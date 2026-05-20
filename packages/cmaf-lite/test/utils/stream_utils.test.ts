@@ -454,6 +454,45 @@ describe("buildStreams (protected)", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
+  it("probes configured key systems even when manifest protection lists different ones", async () => {
+    const spy = mockMediaCapabilities();
+    spy.mockImplementation(async (cfg: MediaDecodingConfiguration) => {
+      const ks = (
+        cfg as MediaDecodingConfiguration & {
+          keySystemConfiguration?: { keySystem?: string };
+        }
+      ).keySystemConfiguration;
+      if (ks?.keySystem === KeySystem.WIDEVINE) {
+        return createDecodingInfo({
+          keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+        });
+      }
+      return createDecodingInfo({ supported: false, keySystemAccess: null });
+    });
+
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({
+          protection: createProtection({
+            keySystems: {
+              [KeySystem.PLAYREADY]: {},
+            },
+          }),
+        }),
+      ],
+    });
+
+    const config = {
+      ...DEFAULT_CONFIG,
+      drm: { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
+    };
+    const list =
+      (await buildStreams(manifest, config)).get(MediaType.VIDEO) ?? [];
+    expect(list).toHaveLength(1);
+    const video = list[0] as VideoStream;
+    expect(video[PROP_KEY_SYSTEM_ACCESS]?.keySystem).toBe(KeySystem.WIDEVINE);
+  });
+
   it("drops streams when no preferred key system is supported", async () => {
     mockMediaCapabilities(
       createDecodingInfo({ supported: false, keySystemAccess: null }),

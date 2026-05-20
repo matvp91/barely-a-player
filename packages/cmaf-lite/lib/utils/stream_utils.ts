@@ -196,8 +196,7 @@ function candidateKeySystems(
   if (!switchingSet.protection) {
     return [];
   }
-  const present = switchingSet.protection.keySystems;
-  return drm.preferredKeySystems.filter((ks) => present[ks] !== undefined);
+  return [...drm.preferredKeySystems];
 }
 
 type KeySystemProbeConfig = MediaKeySystemConfiguration & {
