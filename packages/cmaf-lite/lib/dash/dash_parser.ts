@@ -275,39 +275,10 @@ function parseAdaptationSet(
   throw new Error("Unsupported media type");
 }
 
-/**
- * Parses a DASH `@frameRate` attribute value, which is either an integer
- * (e.g. `"30"`) or a fraction (e.g. `"30000/1001"`), into a decimal number.
- * Returns `undefined` for malformed values.
- */
-function parseFrameRate(value: string): number | undefined {
-  const trimmed = value.trim();
-  const slashIdx = trimmed.indexOf("/");
-  if (slashIdx === -1) {
-    const n = Number(trimmed);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  const num = Number(trimmed.substring(0, slashIdx));
-  const den = Number(trimmed.substring(slashIdx + 1));
-  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
-    return undefined;
-  }
-  return num / den;
-}
-
 const CHANNEL_CONFIG_SCHEMES = new Set<string>([
   "urn:mpeg:dash:23003:3:audio_channel_configuration:2011",
   "urn:mpeg:mpegB:cicp:ChannelConfiguration",
 ]);
-
-function parseFirstNumber(value: string): number | undefined {
-  const first = value.trim().split(/\s+/)[0];
-  if (!first) {
-    return undefined;
-  }
-  const n = Number(first);
-  return Number.isFinite(n) ? n : undefined;
-}
 
 function readChannelCount(node: txml.TNode): number | undefined {
   const cfg = XmlUtils.child(node, "AudioChannelConfiguration");
@@ -344,7 +315,7 @@ function buildTrack(
     asserts.assertExists(height, "height is mandatory");
     const frameRate = Functional.findMap(
       [representation, adaptationSet],
-      (node) => XmlUtils.attr(node, "frameRate", parseFrameRate),
+      (node) => XmlUtils.attr(node, "frameRate", DashHelpers.parseFrameRate),
     );
     return {
       id,
@@ -360,7 +331,8 @@ function buildTrack(
   if (type === MediaType.AUDIO) {
     const sampleRate = Functional.findMap(
       [representation, adaptationSet],
-      (node) => XmlUtils.attr(node, "audioSamplingRate", parseFirstNumber),
+      (node) =>
+        XmlUtils.attr(node, "audioSamplingRate", DashHelpers.parseFirstNumber),
     );
     const channels = Functional.findMap(
       [representation, adaptationSet],

@@ -167,6 +167,40 @@ export function resolveLanguage(node: txml.TNode) {
   return lang && lang !== "und" ? LanguageUtils.toBCP47(lang) : "unk";
 }
 
+/**
+ * Parse a DASH MPD `@frameRate` attribute. The MPD spec allows either
+ * a single decimal (`"30"`) or a fractional form (`"30000/1001"`).
+ * Returns the decimal value, or undefined when malformed.
+ */
+export function parseFrameRate(value: string): number | undefined {
+  const trimmed = value.trim();
+  const slashIdx = trimmed.indexOf("/");
+  if (slashIdx === -1) {
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  const num = Number(trimmed.substring(0, slashIdx));
+  const den = Number(trimmed.substring(slashIdx + 1));
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
+    return undefined;
+  }
+  return num / den;
+}
+
+/**
+ * Parse the first number in a whitespace-separated list. Used for DASH
+ * MPD attributes like `@audioSamplingRate` which may be a list of
+ * supported values; the first is sufficient for capability probing.
+ */
+export function parseFirstNumber(value: string): number | undefined {
+  const first = value.trim().split(/\s+/)[0];
+  if (!first) {
+    return undefined;
+  }
+  const n = Number(first);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 export function resolveProtection(
   adaptationSet: txml.TNode,
   representations: txml.TNode[],
