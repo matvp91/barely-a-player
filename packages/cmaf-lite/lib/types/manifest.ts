@@ -151,6 +151,10 @@ export interface VideoTrack extends BaseTrack {
  */
 export interface AudioTrack extends BaseTrack {
   type: MediaType.AUDIO;
+  /** Channel count (e.g. 2 for stereo, 6 for 5.1). */
+  channels?: number;
+  /** Sample rate in Hz. */
+  sampleRate?: number;
 }
 
 /**
