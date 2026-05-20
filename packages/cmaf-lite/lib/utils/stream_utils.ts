@@ -1,4 +1,4 @@
-import type { DrmConfig } from "../config";
+import type { DrmConfig, PlayerConfig } from "../config";
 import {
   PROP_DECODING_INFO,
   PROP_HIERARCHY,
@@ -18,12 +18,12 @@ import * as CodecUtils from "./codec_utils";
 
 export async function buildStreams(
   manifest: Manifest,
-  drm: DrmConfig,
+  config: PlayerConfig,
 ): Promise<Map<MediaType, Stream[]>> {
   const promises: Promise<Stream | null>[] = [];
   for (const switchingSet of manifest.switchingSets) {
     for (const track of switchingSet.tracks) {
-      promises.push(buildStream(switchingSet, track, drm));
+      promises.push(buildStream(switchingSet, track, config));
     }
   }
 
@@ -92,7 +92,7 @@ function matchesPreference(stream: Stream, preference: Preference): boolean {
 async function buildStream(
   switchingSet: SwitchingSet,
   track: Track,
-  drm: DrmConfig,
+  config: PlayerConfig,
 ): Promise<Stream | null> {
   const codec = CodecUtils.getNormalizedCodec(switchingSet.codec);
   if (track.type === MediaType.VIDEO && switchingSet.type === MediaType.VIDEO) {
@@ -100,7 +100,7 @@ async function buildStream(
       switchingSet.codec,
       track,
       switchingSet,
-      drm,
+      config,
     );
     if (!probe.info.supported) {
       return null;
@@ -124,7 +124,7 @@ async function buildStream(
       switchingSet.codec,
       track,
       switchingSet,
-      drm,
+      config,
     );
     if (!probe.info.supported) {
       return null;
@@ -165,9 +165,9 @@ async function probeDecodingInfo(
   codec: string,
   track: Track,
   switchingSet: SwitchingSet,
-  drm: DrmConfig,
+  config: PlayerConfig,
 ): Promise<DecodingProbe> {
-  const candidates = candidateKeySystems(switchingSet, drm);
+  const candidates = candidateKeySystems(switchingSet, config.drm);
   if (candidates.length === 0) {
     const info = await probeOnce(codec, track, undefined);
     return { info };

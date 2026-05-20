@@ -26,7 +26,7 @@ import {
   createSubtitleSwitchingSet,
   createVideoSwitchingSet,
   createVideoTrack,
-  DEFAULT_DRM_CONFIG,
+  DEFAULT_CONFIG,
   mockMediaCapabilities,
 } from "../__framework__/factories";
 
@@ -60,8 +60,7 @@ describe("findStreamsMatchingPreferences", () => {
       ],
     });
     const list =
-      (await buildStreams(manifest, DEFAULT_DRM_CONFIG)).get(MediaType.VIDEO) ??
-      [];
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     return list.filter((s): s is VideoStream => s.type === MediaType.VIDEO);
   };
 
@@ -158,8 +157,7 @@ describe("pickClosestByBandwidth", () => {
       ],
     });
     const list =
-      (await buildStreams(manifest, DEFAULT_DRM_CONFIG)).get(MediaType.VIDEO) ??
-      [];
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     return list.filter((s): s is VideoStream => s.type === MediaType.VIDEO);
   };
 
@@ -197,14 +195,14 @@ describe("StreamUtils", () => {
   describe("buildStreams", () => {
     it("extracts one stream per unique type and resolution", async () => {
       const manifest = createManifest();
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       expect(streams.get(MediaType.VIDEO)).toHaveLength(1);
       expect(streams.get(MediaType.AUDIO)).toHaveLength(1);
     });
 
     it("wires hierarchy to the manifest's own switching set and track", async () => {
       const manifest = createManifest();
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const videoStream = streams.get(MediaType.VIDEO)![0]!;
       const expectedSwitchingSet = manifest.switchingSets.find(
         (ss) => ss.type === MediaType.VIDEO,
@@ -239,7 +237,7 @@ describe("StreamUtils", () => {
           }),
         ],
       });
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const video = streams.get(MediaType.VIDEO)!;
       const bandwidths = video.map((s) => s.bandwidth);
       expect(bandwidths).toEqual([1_000_000, 3_000_000, 5_000_000]);
@@ -256,7 +254,7 @@ describe("StreamUtils", () => {
           }),
         ],
       });
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       expect(streams.get(MediaType.VIDEO)).toHaveLength(2);
     });
 
@@ -264,7 +262,7 @@ describe("StreamUtils", () => {
       const info = createDecodingInfo();
       mockMediaCapabilities(info);
       const manifest = createManifest();
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const video = streams.get(MediaType.VIDEO) ?? [];
       const audio = streams.get(MediaType.AUDIO) ?? [];
       expect(video).toHaveLength(1);
@@ -294,7 +292,7 @@ describe("StreamUtils", () => {
         const bitrate = config.video?.bitrate ?? 0;
         return createDecodingInfo({ supported: bitrate < 1_000_000 });
       });
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const video = streams.get(MediaType.VIDEO) ?? [];
       expect(video).toHaveLength(1);
       expect(video[0]!.bandwidth).toBe(500_000);
@@ -320,7 +318,7 @@ describe("StreamUtils", () => {
         const codecs = config.video?.contentType ?? "";
         return createDecodingInfo({ supported: codecs.includes("avc1") });
       });
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const video = streams.get(MediaType.VIDEO) ?? [];
       expect(video).toHaveLength(1);
       expect(video[0]!.codec).toBe("avc");
@@ -331,7 +329,7 @@ describe("StreamUtils", () => {
       const manifest = createManifest({
         switchingSets: [createVideoSwitchingSet()],
       });
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       expect(streams.get(MediaType.VIDEO) ?? []).toEqual([]);
     });
 
@@ -341,7 +339,7 @@ describe("StreamUtils", () => {
         createDecodingInfo({ supported: config.audio === undefined }),
       );
       const manifest = createManifest();
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       expect(streams.get(MediaType.AUDIO) ?? []).toEqual([]);
       // Video must still be present.
       expect((streams.get(MediaType.VIDEO) ?? []).length).toBe(1);
@@ -356,7 +354,7 @@ describe("StreamUtils", () => {
           createSubtitleSwitchingSet(),
         ],
       });
-      const streams = await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const subtitles = streams.get(MediaType.SUBTITLE) ?? [];
       expect(subtitles).toHaveLength(1);
       // Subtitle stream must not carry PROP_DECODING_INFO.
@@ -381,7 +379,7 @@ describe("StreamUtils", () => {
           }),
         ],
       });
-      await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      await buildStreams(manifest, DEFAULT_CONFIG);
       expect(spy).toHaveBeenCalledWith({
         type: "media-source",
         video: {
@@ -404,7 +402,7 @@ describe("StreamUtils", () => {
           }),
         ],
       });
-      await buildStreams(manifest, DEFAULT_DRM_CONFIG);
+      await buildStreams(manifest, DEFAULT_CONFIG);
       expect(spy).toHaveBeenCalledWith({
         type: "media-source",
         audio: {
@@ -449,8 +447,7 @@ describe("buildStreams (protected)", () => {
       ],
     });
     const list =
-      (await buildStreams(manifest, DEFAULT_DRM_CONFIG)).get(MediaType.VIDEO) ??
-      [];
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     expect(list).toHaveLength(1);
     const video = list[0] as VideoStream;
     expect(video[PROP_KEY_SYSTEM_ACCESS]?.keySystem).toBe(KeySystem.WIDEVINE);
@@ -467,8 +464,7 @@ describe("buildStreams (protected)", () => {
       ],
     });
     const list =
-      (await buildStreams(manifest, DEFAULT_DRM_CONFIG)).get(MediaType.VIDEO) ??
-      [];
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     expect(list).toHaveLength(0);
   });
 });

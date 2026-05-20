@@ -1,5 +1,6 @@
 import { vi } from "vitest";
-import type { DrmConfig } from "../../lib/config";
+import type { DrmConfig, PlayerConfig } from "../../lib/config";
+import { DEFAULT_CONFIG as LIB_DEFAULT_CONFIG } from "../../lib/config";
 import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
 import type {
   InitSegment,
@@ -184,4 +185,13 @@ export const DEFAULT_DRM_CONFIG: DrmConfig = {
   ],
   licenseUrls: {},
   serverCertificates: {},
+};
+
+/**
+ * Full PlayerConfig fixture for tests. Override individual slices by
+ * spreading: `{ ...DEFAULT_CONFIG, drm: { ...DEFAULT_DRM_CONFIG, ... } }`.
+ */
+export const DEFAULT_CONFIG: PlayerConfig = {
+  ...LIB_DEFAULT_CONFIG,
+  drm: DEFAULT_DRM_CONFIG,
 };
