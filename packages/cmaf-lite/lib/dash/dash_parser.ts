@@ -275,6 +275,26 @@ function parseAdaptationSet(
   throw new Error("Unsupported media type");
 }
 
+/**
+ * Parses a DASH `@frameRate` attribute value, which is either an integer
+ * (e.g. `"30"`) or a fraction (e.g. `"30000/1001"`), into a decimal number.
+ * Returns `undefined` for malformed values.
+ */
+function parseFrameRate(value: string): number | undefined {
+  const trimmed = value.trim();
+  const slashIdx = trimmed.indexOf("/");
+  if (slashIdx === -1) {
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  const num = Number(trimmed.substring(0, slashIdx));
+  const den = Number(trimmed.substring(slashIdx + 1));
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) {
+    return undefined;
+  }
+  return num / den;
+}
+
 function buildTrack(
   type: MediaType,
   id: string,
@@ -296,6 +316,10 @@ function buildTrack(
       XmlUtils.attr(node, "height", XmlUtils.parseNumber),
     );
     asserts.assertExists(height, "height is mandatory");
+    const frameRate = Functional.findMap(
+      [representation, adaptationSet],
+      (node) => XmlUtils.attr(node, "frameRate", parseFrameRate),
+    );
     return {
       id,
       type,
@@ -304,6 +328,7 @@ function buildTrack(
       bandwidth,
       segments: [],
       maxSegmentDuration: 0,
+      ...(frameRate !== undefined ? { frameRate } : {}),
     };
   }
   if (type === MediaType.AUDIO) {

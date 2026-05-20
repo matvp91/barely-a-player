@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as DashParser from "../../lib/dash/dash_parser";
 import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
+import type { VideoTrack } from "../../lib/types/manifest";
 import { MediaType } from "../../lib/types/media";
 import { loadFixture } from "../fixtures";
 import { findAudio, findSubtitle, findVideo } from "./helpers";
@@ -157,6 +158,44 @@ describe("DashParser", () => {
       );
       expect(manifest.switchingSets).toHaveLength(1);
       expect(manifest.switchingSets[0]!.type).toBe(MediaType.VIDEO);
+    });
+  });
+
+  describe("frameRate", () => {
+    it("parses frameRate as a decimal integer", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-framerate-integer.mpd"),
+        sourceUrl,
+      );
+      const track = findVideo(manifest).tracks[0]! as VideoTrack;
+      expect(track.frameRate).toBe(30);
+    });
+
+    it("parses frameRate in fractional form", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-framerate-fractional.mpd"),
+        sourceUrl,
+      );
+      const track = findVideo(manifest).tracks[0]! as VideoTrack;
+      expect(track.frameRate).toBeCloseTo(29.97, 2);
+    });
+
+    it("falls back to AdaptationSet frameRate when Representation lacks it", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-framerate-on-adaptation-set.mpd"),
+        sourceUrl,
+      );
+      const track = findVideo(manifest).tracks[0]! as VideoTrack;
+      expect(track.frameRate).toBe(24);
+    });
+
+    it("leaves frameRate undefined when neither node declares it", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-basic.mpd"),
+        sourceUrl,
+      );
+      const track = findVideo(manifest).tracks[0]! as VideoTrack;
+      expect(track.frameRate).toBeUndefined();
     });
   });
 
