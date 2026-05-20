@@ -96,12 +96,7 @@ async function buildStream(
 ): Promise<Stream | null> {
   const codec = CodecUtils.getNormalizedCodec(switchingSet.codec);
   if (track.type === MediaType.VIDEO && switchingSet.type === MediaType.VIDEO) {
-    const probe = await probeDecodingInfo(
-      switchingSet.codec,
-      track,
-      switchingSet,
-      config,
-    );
+    const probe = await probeDecodingInfo(track, switchingSet, config);
     if (!probe.info.supported) {
       return null;
     }
@@ -120,12 +115,7 @@ async function buildStream(
     return stream;
   }
   if (track.type === MediaType.AUDIO && switchingSet.type === MediaType.AUDIO) {
-    const probe = await probeDecodingInfo(
-      switchingSet.codec,
-      track,
-      switchingSet,
-      config,
-    );
+    const probe = await probeDecodingInfo(track, switchingSet, config);
     if (!probe.info.supported) {
       return null;
     }
@@ -162,19 +152,17 @@ type DecodingProbe = {
 };
 
 async function probeDecodingInfo(
-  codec: string,
   track: Track,
   switchingSet: SwitchingSet,
   config: PlayerConfig,
 ): Promise<DecodingProbe> {
   const candidates = candidateKeySystems(switchingSet, config.drm);
   if (candidates.length === 0) {
-    const info = await probeOnce(codec, track, undefined);
+    const info = await probeOnce(track, switchingSet, undefined);
     return { info };
   }
   for (const keySystem of candidates) {
-    const config = buildKeySystemConfig(keySystem, switchingSet, track);
-    const info = await probeOnce(codec, track, config);
+    const info = await probeOnce(track, switchingSet, keySystem);
     if (info.supported) {
       return { info, keySystemAccess: info.keySystemAccess ?? undefined };
     }
@@ -199,36 +187,76 @@ function candidateKeySystems(
   return [...drm.preferredKeySystems];
 }
 
+const DEFAULT_VIDEO_FRAMERATE = 30;
+const DEFAULT_AUDIO_CHANNELS = "2";
+const DEFAULT_AUDIO_SAMPLERATE = 48_000;
+
 type KeySystemProbeConfig = MediaKeySystemConfiguration & {
   keySystem: string;
 };
 
-function buildKeySystemConfig(
-  keySystem: KeySystem,
-  switchingSet: SwitchingSet,
+export function buildDecodingConfig(
   track: Track,
-): KeySystemProbeConfig {
-  const contentType =
-    track.type === MediaType.VIDEO
-      ? `video/mp4; codecs="${switchingSet.codec}"`
-      : `audio/mp4; codecs="${switchingSet.codec}"`;
-  const cap: MediaKeySystemMediaCapability = {
-    contentType,
-    robustness: defaultRobustness(keySystem),
-  };
-  const config: KeySystemProbeConfig = {
-    keySystem,
-    initDataTypes: ["cenc"],
-    distinctiveIdentifier: "optional",
-    persistentState: "optional",
-    sessionTypes: ["temporary"],
-  };
-  if (track.type === MediaType.VIDEO) {
-    config.videoCapabilities = [cap];
+  switchingSet: SwitchingSet,
+  keySystem?: KeySystem,
+): MediaDecodingConfiguration {
+  const contentType = CodecUtils.getContentType(track.type, switchingSet.codec);
+  let base: MediaDecodingConfiguration;
+  if (track.type === MediaType.VIDEO && switchingSet.type === MediaType.VIDEO) {
+    base = {
+      type: "media-source",
+      video: {
+        contentType,
+        width: track.width,
+        height: track.height,
+        bitrate: track.bandwidth,
+        framerate: track.frameRate ?? DEFAULT_VIDEO_FRAMERATE,
+      },
+    };
+  } else if (
+    track.type === MediaType.AUDIO &&
+    switchingSet.type === MediaType.AUDIO
+  ) {
+    base = {
+      type: "media-source",
+      audio: {
+        contentType,
+        bitrate: track.bandwidth,
+        channels: String(track.channels ?? DEFAULT_AUDIO_CHANNELS),
+        samplerate: track.sampleRate ?? DEFAULT_AUDIO_SAMPLERATE,
+      },
+    };
   } else {
-    config.audioCapabilities = [cap];
+    throw new Error(
+      `buildDecodingConfig: unsupported track type ${track.type}`,
+    );
   }
-  return config;
+
+  if (keySystem !== undefined) {
+    const cap: MediaKeySystemMediaCapability = {
+      contentType,
+      robustness: defaultRobustness(keySystem),
+    };
+    const ksConfig: KeySystemProbeConfig = {
+      keySystem,
+      initDataTypes: ["cenc"],
+      distinctiveIdentifier: "optional",
+      persistentState: "optional",
+      sessionTypes: ["temporary"],
+    };
+    if (track.type === MediaType.VIDEO) {
+      ksConfig.videoCapabilities = [cap];
+    } else {
+      ksConfig.audioCapabilities = [cap];
+    }
+    (
+      base as MediaDecodingConfiguration & {
+        keySystemConfiguration: KeySystemProbeConfig;
+      }
+    ).keySystemConfiguration = ksConfig;
+  }
+
+  return base;
 }
 
 function defaultRobustness(keySystem: KeySystem): string {
@@ -242,39 +270,13 @@ function defaultRobustness(keySystem: KeySystem): string {
 }
 
 async function probeOnce(
-  codec: string,
   track: Track,
-  keySystemConfiguration: KeySystemProbeConfig | undefined,
+  switchingSet: SwitchingSet,
+  keySystem: KeySystem | undefined,
 ): Promise<MediaCapabilitiesDecodingInfo> {
-  const base: MediaDecodingConfiguration =
-    track.type === MediaType.VIDEO
-      ? {
-          type: "media-source",
-          video: {
-            contentType: `video/mp4; codecs="${codec}"`,
-            width: track.width,
-            height: track.height,
-            bitrate: track.bandwidth,
-            framerate: 30,
-          },
-        }
-      : {
-          type: "media-source",
-          audio: {
-            contentType: `audio/mp4; codecs="${codec}"`,
-            bitrate: track.bandwidth,
-            channels: "2",
-            samplerate: 48000,
-          },
-        };
-  if (keySystemConfiguration) {
-    (
-      base as MediaDecodingConfiguration & {
-        keySystemConfiguration: KeySystemProbeConfig;
-      }
-    ).keySystemConfiguration = keySystemConfiguration;
-  }
-  return navigator.mediaCapabilities.decodingInfo(base);
+  return navigator.mediaCapabilities.decodingInfo(
+    buildDecodingConfig(track, switchingSet, keySystem),
+  );
 }
 
 export function pickClosestByBandwidth(

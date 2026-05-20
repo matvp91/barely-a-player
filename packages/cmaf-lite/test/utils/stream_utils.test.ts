@@ -12,6 +12,7 @@ import type {
 } from "../../lib/types/media";
 import { MediaType } from "../../lib/types/media";
 import {
+  buildDecodingConfig,
   buildStreams,
   findStreamsMatchingPreferences,
   pickClosestByBandwidth,
@@ -413,6 +414,111 @@ describe("StreamUtils", () => {
         },
       });
     });
+  });
+});
+
+describe("buildDecodingConfig", () => {
+  it("builds a clear-content video config using getContentType and track metadata", () => {
+    const track = createVideoTrack({
+      width: 1920,
+      height: 1080,
+      bandwidth: 5_000_000,
+      frameRate: 29.97,
+    });
+    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
+    const config = buildDecodingConfig(track, switchingSet);
+    expect(config).toEqual({
+      type: "media-source",
+      video: {
+        contentType: 'video/mp4; codecs="avc1.640028"',
+        width: 1920,
+        height: 1080,
+        bitrate: 5_000_000,
+        framerate: 29.97,
+      },
+    });
+  });
+
+  it("falls back to default framerate when track does not declare one", () => {
+    const track = createVideoTrack({
+      bandwidth: 2_000_000,
+      width: 1280,
+      height: 720,
+    });
+    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
+    const config = buildDecodingConfig(track, switchingSet);
+    expect(config.video?.framerate).toBe(30);
+  });
+
+  it("builds an audio config using track channels and sampleRate", () => {
+    const track = createAudioTrack({
+      bandwidth: 128_000,
+      channels: 6,
+      sampleRate: 44_100,
+    });
+    const switchingSet = createAudioSwitchingSet({ codec: "mp4a.40.2" });
+    const config = buildDecodingConfig(track, switchingSet);
+    expect(config).toEqual({
+      type: "media-source",
+      audio: {
+        contentType: 'audio/mp4; codecs="mp4a.40.2"',
+        bitrate: 128_000,
+        channels: "6",
+        samplerate: 44_100,
+      },
+    });
+  });
+
+  it("falls back to default channels and samplerate when track lacks them", () => {
+    const track = createAudioTrack({ bandwidth: 128_000 });
+    const switchingSet = createAudioSwitchingSet({ codec: "mp4a.40.2" });
+    const config = buildDecodingConfig(track, switchingSet);
+    expect(config.audio?.channels).toBe("2");
+    expect(config.audio?.samplerate).toBe(48_000);
+  });
+
+  it("attaches a keySystemConfiguration when a key system is provided", () => {
+    const track = createVideoTrack({
+      width: 1920,
+      height: 1080,
+      bandwidth: 5_000_000,
+    });
+    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
+    const config = buildDecodingConfig(
+      track,
+      switchingSet,
+      KeySystem.WIDEVINE,
+    ) as MediaDecodingConfiguration & {
+      keySystemConfiguration: MediaKeySystemConfiguration & {
+        keySystem: string;
+      };
+    };
+    expect(config.keySystemConfiguration.keySystem).toBe(KeySystem.WIDEVINE);
+    expect(config.keySystemConfiguration.videoCapabilities![0]).toEqual({
+      contentType: 'video/mp4; codecs="avc1.640028"',
+      robustness: "SW_SECURE_CRYPTO",
+    });
+    expect(config.keySystemConfiguration.initDataTypes).toEqual(["cenc"]);
+    expect(config.keySystemConfiguration.audioCapabilities).toBeUndefined();
+  });
+
+  it("uses audioCapabilities for an audio key system probe", () => {
+    const track = createAudioTrack({ bandwidth: 128_000 });
+    const switchingSet = createAudioSwitchingSet({ codec: "mp4a.40.2" });
+    const config = buildDecodingConfig(
+      track,
+      switchingSet,
+      KeySystem.WIDEVINE,
+    ) as MediaDecodingConfiguration & {
+      keySystemConfiguration: MediaKeySystemConfiguration & {
+        keySystem: string;
+      };
+    };
+    expect(config.keySystemConfiguration.audioCapabilities![0]).toEqual({
+      contentType: 'audio/mp4; codecs="mp4a.40.2"',
+      robustness: "SW_SECURE_CRYPTO",
+    });
+    expect(config.keySystemConfiguration.videoCapabilities).toBeUndefined();
   });
 });
 
