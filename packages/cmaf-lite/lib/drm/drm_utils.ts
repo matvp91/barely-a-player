@@ -1,5 +1,6 @@
 import { KeySystem } from "../types/drm";
 import type { KeySystemInfo } from "../types/manifest";
+import * as StringUtils from "../utils/string_utils";
 
 const KEY_SYSTEM_BY_UUID: Record<string, KeySystem> = {
   "edef8ba9-79d6-4ace-a3c8-27dcd51d21ed": KeySystem.WIDEVINE,
@@ -47,14 +48,8 @@ export function keySystemInfoFromRaw(
   if (!psshText) {
     return {};
   }
-  return { pssh: decodeBase64(psshText.trim()) };
-}
-
-function decodeBase64(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) {
-    out[i] = bin.charCodeAt(i);
-  }
-  return out;
+  const trimmedPsshText = psshText.trim();
+  return {
+    pssh: StringUtils.decodeBase64(trimmedPsshText),
+  };
 }
