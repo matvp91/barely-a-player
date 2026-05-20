@@ -140,6 +140,8 @@ export interface VideoTrack extends BaseTrack {
   width: number;
   /** Video height. */
   height: number;
+  /** Frames per second. Decimal form (e.g. 30 or 29.97). */
+  frameRate?: number;
 }
 
 /**
