@@ -95,43 +95,7 @@ async function buildStream(
   config: PlayerConfig,
 ): Promise<Stream | null> {
   const codec = CodecUtils.getNormalizedCodec(switchingSet.codec);
-  if (track.type === MediaType.VIDEO && switchingSet.type === MediaType.VIDEO) {
-    const probe = await probeDecodingInfo(track, switchingSet, config);
-    if (!probe.info.supported) {
-      return null;
-    }
-    const stream: VideoStream = {
-      type: MediaType.VIDEO,
-      codec,
-      bandwidth: track.bandwidth,
-      width: track.width,
-      height: track.height,
-      [PROP_HIERARCHY]: { switchingSet, track },
-      [PROP_DECODING_INFO]: probe.info,
-    };
-    if (probe.keySystemAccess) {
-      stream[PROP_KEY_SYSTEM_ACCESS] = probe.keySystemAccess;
-    }
-    return stream;
-  }
-  if (track.type === MediaType.AUDIO && switchingSet.type === MediaType.AUDIO) {
-    const probe = await probeDecodingInfo(track, switchingSet, config);
-    if (!probe.info.supported) {
-      return null;
-    }
-    const stream: AudioStream = {
-      type: MediaType.AUDIO,
-      codec,
-      bandwidth: track.bandwidth,
-      language: switchingSet.language,
-      [PROP_HIERARCHY]: { switchingSet, track },
-      [PROP_DECODING_INFO]: probe.info,
-    };
-    if (probe.keySystemAccess) {
-      stream[PROP_KEY_SYSTEM_ACCESS] = probe.keySystemAccess;
-    }
-    return stream;
-  }
+
   if (
     track.type === MediaType.SUBTITLE &&
     switchingSet.type === MediaType.SUBTITLE
@@ -143,38 +107,73 @@ async function buildStream(
       [PROP_HIERARCHY]: { switchingSet, track },
     };
   }
+
+  const info = await probeTrack(track, switchingSet, config);
+  if (!info.supported) {
+    return null;
+  }
+
+  if (track.type === MediaType.VIDEO && switchingSet.type === MediaType.VIDEO) {
+    const stream: VideoStream = {
+      type: MediaType.VIDEO,
+      codec,
+      bandwidth: track.bandwidth,
+      width: track.width,
+      height: track.height,
+      [PROP_HIERARCHY]: { switchingSet, track },
+      [PROP_DECODING_INFO]: info,
+    };
+    if (info.keySystemAccess) {
+      stream[PROP_KEY_SYSTEM_ACCESS] = info.keySystemAccess;
+    }
+    return stream;
+  }
+  if (track.type === MediaType.AUDIO && switchingSet.type === MediaType.AUDIO) {
+    const stream: AudioStream = {
+      type: MediaType.AUDIO,
+      codec,
+      bandwidth: track.bandwidth,
+      language: switchingSet.language,
+      [PROP_HIERARCHY]: { switchingSet, track },
+      [PROP_DECODING_INFO]: info,
+    };
+    if (info.keySystemAccess) {
+      stream[PROP_KEY_SYSTEM_ACCESS] = info.keySystemAccess;
+    }
+    return stream;
+  }
   throw new Error(`Failed to map track for type ${track.type}`);
 }
 
-type DecodingProbe = {
-  info: MediaCapabilitiesDecodingInfo;
-  keySystemAccess?: MediaKeySystemAccess;
-};
-
-async function probeDecodingInfo(
+async function probeTrack(
   track: Track,
   switchingSet: SwitchingSet,
   config: PlayerConfig,
-): Promise<DecodingProbe> {
+): Promise<MediaCapabilitiesDecodingInfo> {
   const candidates = candidateKeySystems(switchingSet, config.drm);
   if (candidates.length === 0) {
-    const info = await probeOnce(track, switchingSet, undefined);
-    return { info };
+    return navigator.mediaCapabilities.decodingInfo(
+      buildDecodingConfig(track, switchingSet),
+    );
   }
+  let last: MediaCapabilitiesDecodingInfo | null = null;
   for (const keySystem of candidates) {
-    const info = await probeOnce(track, switchingSet, keySystem);
+    const info = await navigator.mediaCapabilities.decodingInfo(
+      buildDecodingConfig(track, switchingSet, keySystem),
+    );
     if (info.supported) {
-      return { info, keySystemAccess: info.keySystemAccess ?? undefined };
+      return info;
     }
+    last = info;
   }
-  return {
-    info: {
+  return (
+    last ?? {
       supported: false,
       smooth: false,
       powerEfficient: false,
       keySystemAccess: null,
-    },
-  };
+    }
+  );
 }
 
 function candidateKeySystems(
@@ -267,16 +266,6 @@ function defaultRobustness(keySystem: KeySystem): string {
     return "150";
   }
   return "";
-}
-
-async function probeOnce(
-  track: Track,
-  switchingSet: SwitchingSet,
-  keySystem: KeySystem | undefined,
-): Promise<MediaCapabilitiesDecodingInfo> {
-  return navigator.mediaCapabilities.decodingInfo(
-    buildDecodingConfig(track, switchingSet, keySystem),
-  );
 }
 
 export function pickClosestByBandwidth(
