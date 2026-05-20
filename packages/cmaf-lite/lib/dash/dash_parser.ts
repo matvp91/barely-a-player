@@ -295,6 +295,32 @@ function parseFrameRate(value: string): number | undefined {
   return num / den;
 }
 
+const CHANNEL_CONFIG_SCHEMES = new Set<string>([
+  "urn:mpeg:dash:23003:3:audio_channel_configuration:2011",
+  "urn:mpeg:mpegB:cicp:ChannelConfiguration",
+]);
+
+function parseFirstNumber(value: string): number | undefined {
+  const first = value.trim().split(/\s+/)[0];
+  if (!first) {
+    return undefined;
+  }
+  const n = Number(first);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function readChannelCount(node: txml.TNode): number | undefined {
+  const cfg = XmlUtils.child(node, "AudioChannelConfiguration");
+  if (!cfg) {
+    return undefined;
+  }
+  const scheme = XmlUtils.attr(cfg, "schemeIdUri", XmlUtils.parseString);
+  if (!scheme || !CHANNEL_CONFIG_SCHEMES.has(scheme)) {
+    return undefined;
+  }
+  return XmlUtils.attr(cfg, "value", XmlUtils.parseNumber);
+}
+
 function buildTrack(
   type: MediaType,
   id: string,
@@ -332,7 +358,23 @@ function buildTrack(
     };
   }
   if (type === MediaType.AUDIO) {
-    return { id, type, bandwidth, segments: [], maxSegmentDuration: 0 };
+    const sampleRate = Functional.findMap(
+      [representation, adaptationSet],
+      (node) => XmlUtils.attr(node, "audioSamplingRate", parseFirstNumber),
+    );
+    const channels = Functional.findMap(
+      [representation, adaptationSet],
+      (node) => readChannelCount(node),
+    );
+    return {
+      id,
+      type,
+      bandwidth,
+      segments: [],
+      maxSegmentDuration: 0,
+      ...(channels !== undefined ? { channels } : {}),
+      ...(sampleRate !== undefined ? { sampleRate } : {}),
+    };
   }
   if (type === MediaType.SUBTITLE) {
     return { id, type, bandwidth, segments: [], maxSegmentDuration: 0 };

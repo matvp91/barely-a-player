@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as DashParser from "../../lib/dash/dash_parser";
 import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
-import type { VideoTrack } from "../../lib/types/manifest";
+import type { AudioTrack, VideoTrack } from "../../lib/types/manifest";
 import { MediaType } from "../../lib/types/media";
 import { loadFixture } from "../fixtures";
 import { findAudio, findSubtitle, findVideo } from "./helpers";
@@ -196,6 +196,63 @@ describe("DashParser", () => {
       );
       const track = findVideo(manifest).tracks[0]! as VideoTrack;
       expect(track.frameRate).toBeUndefined();
+    });
+  });
+
+  describe("audioSamplingRate and AudioChannelConfiguration", () => {
+    it("parses audioSamplingRate as a number when a single value is declared", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-samplerate-single.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.sampleRate).toBe(48000);
+    });
+
+    it("uses the first value when audioSamplingRate is space-separated", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-samplerate-multi.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.sampleRate).toBe(48000);
+    });
+
+    it("parses channel count from MPEG DASH AudioChannelConfiguration scheme", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-channels-mpeg-dash.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.channels).toBe(2);
+    });
+
+    it("parses channel count from MPEG CICP AudioChannelConfiguration scheme", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-channels-cicp.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.channels).toBe(6);
+    });
+
+    it("leaves channels undefined for an unknown AudioChannelConfiguration schemeIdUri", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-channels-unknown-scheme.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.channels).toBeUndefined();
+    });
+
+    it("leaves sampleRate and channels undefined when neither node declares them", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-basic.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.sampleRate).toBeUndefined();
+      expect(track.channels).toBeUndefined();
     });
   });
 

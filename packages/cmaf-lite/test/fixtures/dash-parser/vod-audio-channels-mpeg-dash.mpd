@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" mediaPresentationDuration="PT60S">
+  <Period>
+    <AdaptationSet contentType="audio" mimeType="audio/mp4" codecs="mp4a.40.2" lang="en">
+      <SegmentTemplate timescale="44100" media="audio-$Number$.m4s" initialization="audio-init.mp4" startNumber="1" duration="176400" />
+      <Representation id="1" bandwidth="128000">
+        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2" />
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
