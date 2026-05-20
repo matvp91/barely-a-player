@@ -176,6 +176,23 @@ Unchanged. `Stream` still carries `[PROP_HIERARCHY]`,
 `[PROP_DECODING_INFO]`, and optional `[PROP_KEY_SYSTEM_ACCESS]`. ABR's
 use of `decodingInfo` (smooth / powerEfficient hints) is preserved.
 
+`buildStream` reads `keySystemAccess` directly off the
+`MediaCapabilitiesDecodingInfo` result returned by `probeTrack` (the
+native field, typed `MediaKeySystemAccess | null`) and attaches it to
+the Stream when present:
+
+```ts
+const info = await probeTrack(track, switchingSet, config);
+if (!info.supported) return null;
+const stream: VideoStream = {
+  /* ... */
+  [PROP_DECODING_INFO]: info,
+};
+if (info.keySystemAccess) {
+  stream[PROP_KEY_SYSTEM_ACCESS] = info.keySystemAccess;
+}
+```
+
 ### Call site updates
 
 - `lib/media/stream_controller.ts` — change
