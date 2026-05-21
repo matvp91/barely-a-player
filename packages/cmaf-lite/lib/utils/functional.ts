@@ -29,6 +29,26 @@ export function filterMap<T>(items: T[], fnOrKey: Accessor<T>) {
   return result;
 }
 
+export function groupBy<T extends object, K>(
+  items: (T | null | undefined)[],
+  keyFn: (item: T) => K,
+): Map<K, T[]> {
+  const result = new Map<K, T[]>();
+  for (const item of items) {
+    if (!item) {
+      continue;
+    }
+    const key = keyFn(item);
+    const list = result.get(key);
+    if (list) {
+      list.push(item);
+    } else {
+      result.set(key, [item]);
+    }
+  }
+  return result;
+}
+
 export function firstNonEmpty<T>(list: (T[] | undefined)[]): T[] {
   return list.find((a): a is T[] => a !== undefined && a.length > 0) ?? [];
 }

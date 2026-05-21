@@ -15,6 +15,7 @@ import type {
 import { MediaType } from "../types/media";
 import * as asserts from "./asserts";
 import * as CodecUtils from "./codec_utils";
+import * as Functional from "./functional";
 
 export async function buildStreams(
   manifest: Manifest,
@@ -27,19 +28,8 @@ export async function buildStreams(
     }
   }
 
-  const maybeStreams = await Promise.all(promises);
-  const streams = maybeStreams.filter((s): s is Stream => s !== null);
-
-  const result = new Map<MediaType, Stream[]>([
-    [MediaType.VIDEO, []],
-    [MediaType.AUDIO, []],
-    [MediaType.SUBTITLE, []],
-  ]);
-  for (const stream of streams) {
-    const list = result.get(stream.type);
-    asserts.assertExists(list, `No list for ${stream.type}`);
-    list.push(stream);
-  }
+  const streams = await Promise.all(promises);
+  const result = Functional.groupBy(streams, (s) => s.type);
 
   // Sorted by bandwidth ascending — index 0 is lowest quality.
   // Required for ABR rules to reason about the quality ladder.
