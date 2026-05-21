@@ -70,10 +70,9 @@ export function resolveCodec(
   const firstRepresentation = representations[0];
   asserts.assertExists(firstRepresentation, "No Representation found");
 
-  const codec = XmlUtils.inheritedAttr(
+  const codec = Functional.findMap(
     [firstRepresentation, adaptationSet],
-    "codecs",
-    XmlUtils.parseString,
+    (node) => XmlUtils.attr(node, "codecs", XmlUtils.parseString),
   );
   asserts.assertExists(codec, "codecs is mandatory");
 
@@ -170,11 +169,14 @@ export function resolveProtection(
   adaptationSet: txml.TNode,
   representations: txml.TNode[],
 ): Protection | null {
-  let elements = XmlUtils.children(adaptationSet, "ContentProtection");
-  if (elements.length === 0 && representations[0]) {
-    elements = XmlUtils.children(representations[0], "ContentProtection");
-  }
-  if (elements.length === 0) {
+  const firstRepresentation = representations[0];
+  const nodes = Functional.firstNonEmpty([
+    XmlUtils.children(adaptationSet, "ContentProtection"),
+    firstRepresentation &&
+      XmlUtils.children(firstRepresentation, "ContentProtection"),
+  ]);
+
+  if (nodes.length === 0) {
     return null;
   }
 
@@ -182,8 +184,12 @@ export function resolveProtection(
   let defaultKid: string | null = null;
   const keySystems: Partial<Record<KeySystem, KeySystemInfo>> = {};
 
-  for (const el of elements) {
-    const schemeIdUri = XmlUtils.attr(el, "schemeIdUri", XmlUtils.parseString);
+  for (const node of nodes) {
+    const schemeIdUri = XmlUtils.attr(
+      node,
+      "schemeIdUri",
+      XmlUtils.parseString,
+    );
     if (!schemeIdUri) {
       continue;
     }
@@ -191,11 +197,11 @@ export function resolveProtection(
     // DASH scheme URN for the mp4protection element that carries scheme
     // and default_KID.
     if (schemeIdUri === "urn:mpeg:dash:mp4protection:2011") {
-      const value = XmlUtils.attr(el, "value", XmlUtils.parseString);
+      const value = XmlUtils.attr(node, "value", XmlUtils.parseString);
       if (value === EncryptionScheme.CENC || value === EncryptionScheme.CBCS) {
         scheme = value;
       }
-      const kid = XmlUtils.attr(el, "cenc:default_KID", XmlUtils.parseString);
+      const kid = XmlUtils.attr(node, "cenc:default_KID", XmlUtils.parseString);
       if (kid) {
         defaultKid = kid.toLowerCase();
       }
@@ -206,41 +212,33 @@ export function resolveProtection(
     if (!keySystem) {
       continue;
     }
-    const value = XmlUtils.attr(el, "value", XmlUtils.parseString);
-    const psshText = XmlUtils.text(XmlUtils.child(el, "cenc:pssh"));
-    keySystems[keySystem] = keySystemInfoFromRaw(
-      keySystem,
-      value ?? undefined,
-      psshText,
-    );
+
+    const value = XmlUtils.attr(node, "value", XmlUtils.parseString);
+    const psshText = XmlUtils.text(XmlUtils.child(node, "cenc:pssh"));
+    keySystems[keySystem] = keySystemInfoFromRaw(keySystem, value, psshText);
   }
 
-  if (scheme === null) {
-    return null;
-  }
-  if (defaultKid === null) {
-    throw new Error(
-      "ContentProtection: mp4protection present without cenc:default_KID",
-    );
-  }
+  asserts.assertExists(scheme, "Missing scheme");
+  asserts.assertExists(defaultKid, "Missing cenc:default_KID");
+
   return { scheme, defaultKid, keySystems };
 }
 
-export function parseFrameRate(value: string): number | undefined {
-  const trimmed = value.trim();
-  const isx = trimmed.indexOf("/");
-  if (isx === -1) {
-    const n = Number(trimmed);
-    return Number.isFinite(n) ? n : undefined;
+export function resolveChannelCount(node: txml.TNode): number | undefined {
+  const acc = XmlUtils.child(node, "AudioChannelConfiguration");
+  if (!acc) {
+    return undefined;
   }
-  const numerator = Number(trimmed.substring(0, isx));
-  const denominator = Number(trimmed.substring(isx + 1));
+  const scheme = XmlUtils.attr(acc, "schemeIdUri", XmlUtils.parseString);
   if (
-    !Number.isFinite(numerator) ||
-    !Number.isFinite(denominator) ||
-    denominator === 0
+    scheme !== "urn:mpeg:dash:23003:3:audio_channel_configuration:2011" &&
+    scheme !== "urn:mpeg:mpegB:cicp:ChannelConfiguration"
   ) {
     return undefined;
   }
-  return numerator / denominator;
+  const value = XmlUtils.attr(acc, "value", XmlUtils.parseString);
+  if (!value) {
+    return undefined;
+  }
+  return Number.parseInt(value, 10);
 }

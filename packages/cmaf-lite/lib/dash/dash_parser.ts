@@ -53,6 +53,7 @@ function readMpd(
 
   const type = XmlUtils.attr(mpd, "type", XmlUtils.parseString);
   manifest.isLive = type === "dynamic";
+
   const timing = DashHelpers.getSwitchingSetTiming(manifest.switchingSets);
   manifest.start = timing.firstSegmentStart;
   manifest.end = timing.lastSegmentEnd;
@@ -268,32 +269,10 @@ function parseAdaptationSet(
       type,
       codec,
       language,
-      ...(protection ? { protection } : {}),
       tracks: [],
     };
   }
   throw new Error("Unsupported media type");
-}
-
-const CHANNEL_CONFIG_SCHEMES = new Set<string>([
-  "urn:mpeg:dash:23003:3:audio_channel_configuration:2011",
-  "urn:mpeg:mpegB:cicp:ChannelConfiguration",
-]);
-
-function readChannelCount(node: txml.TNode): number | undefined {
-  const cfg = XmlUtils.child(node, "AudioChannelConfiguration");
-  if (!cfg) {
-    return undefined;
-  }
-  const scheme = XmlUtils.attr(cfg, "schemeIdUri", XmlUtils.parseString);
-  if (!scheme || !CHANNEL_CONFIG_SCHEMES.has(scheme)) {
-    return undefined;
-  }
-  const value = XmlUtils.attr(cfg, "value", XmlUtils.parseString);
-  if (value) {
-    return Number.parseInt(value, 10);
-  }
-  return undefined;
 }
 
 function buildTrack(
@@ -310,24 +289,21 @@ function buildTrack(
 
   if (type === MediaType.VIDEO) {
     const nodes = [representation, adaptationSet];
-    const width = XmlUtils.inheritedAttr(nodes, "width", XmlUtils.parseNumber);
+
+    const width = Functional.findMap(nodes, (n) =>
+      XmlUtils.attr(n, "width", XmlUtils.parseNumber),
+    );
     asserts.assertExists(width, "width is mandatory");
 
-    const height = XmlUtils.inheritedAttr(
-      nodes,
-      "height",
-      XmlUtils.parseNumber,
+    const height = Functional.findMap(nodes, (n) =>
+      XmlUtils.attr(n, "height", XmlUtils.parseNumber),
     );
     asserts.assertExists(height, "height is mandatory");
 
-    const frameRateStr = XmlUtils.inheritedAttr(
-      nodes,
-      "frameRate",
-      XmlUtils.parseString,
+    const frameRate = Functional.findMap(nodes, (n) =>
+      XmlUtils.attr(n, "frameRate", parseFrameRate),
     );
-    asserts.assertExists(frameRateStr, "frameRate is mandatory");
-    const frameRate = DashHelpers.parseFrameRate(frameRateStr);
-    asserts.assertExists(frameRate, "frameRate cannot be parsed");
+    asserts.assertExists(frameRate, "frameRate is mandatory");
 
     return {
       id,
@@ -341,17 +317,14 @@ function buildTrack(
     };
   }
   if (type === MediaType.AUDIO) {
-    const sampleRate = XmlUtils.inheritedAttr(
-      [representation, adaptationSet],
-      "audioSamplingRate",
-      XmlUtils.parseNumber,
+    const nodes = [representation, adaptationSet];
+
+    const sampleRate = Functional.findMap(nodes, (n) =>
+      XmlUtils.attr(n, "audioSamplingRate", XmlUtils.parseNumber),
     );
     asserts.assertExists(sampleRate, "sampleRate is mandatory");
 
-    const channels = Functional.findMap(
-      [representation, adaptationSet],
-      (node) => readChannelCount(node),
-    );
+    const channels = Functional.findMap(nodes, DashHelpers.resolveChannelCount);
     asserts.assertExists(channels, "channels is mandatory");
 
     return {
@@ -365,7 +338,13 @@ function buildTrack(
     };
   }
   if (type === MediaType.SUBTITLE) {
-    return { id, type, bandwidth, segments: [], maxSegmentDuration: 0 };
+    return {
+      id,
+      type,
+      bandwidth,
+      segments: [],
+      maxSegmentDuration: 0,
+    };
   }
   throw new Error("Unsupported media type");
 }
@@ -546,4 +525,23 @@ function appendSegments(
   }
 
   return { maxSegmentDuration, firstAvailableStart };
+}
+
+export function parseFrameRate(value: string): number | undefined {
+  const trimmed = value.trim();
+  const isx = trimmed.indexOf("/");
+  if (isx === -1) {
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  const numerator = Number(trimmed.substring(0, isx));
+  const denominator = Number(trimmed.substring(isx + 1));
+  if (
+    !Number.isFinite(numerator) ||
+    !Number.isFinite(denominator) ||
+    denominator === 0
+  ) {
+    return undefined;
+  }
+  return numerator / denominator;
 }

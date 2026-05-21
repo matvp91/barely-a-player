@@ -29,6 +29,10 @@ export function filterMap<T>(items: T[], fnOrKey: Accessor<T>) {
   return result;
 }
 
+export function firstNonEmpty<T>(list: (T[] | undefined)[]): T[] {
+  return list.find((a): a is T[] => a !== undefined && a.length > 0) ?? [];
+}
+
 function resolve<T>(item: T, fnOrKey: Accessor<T>) {
   return typeof fnOrKey === "function" ? fnOrKey(item) : item[fnOrKey];
 }
