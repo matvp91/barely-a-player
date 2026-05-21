@@ -289,7 +289,11 @@ function readChannelCount(node: txml.TNode): number | undefined {
   if (!scheme || !CHANNEL_CONFIG_SCHEMES.has(scheme)) {
     return undefined;
   }
-  return XmlUtils.attr(cfg, "value", XmlUtils.parseNumber);
+  const value = XmlUtils.attr(cfg, "value", XmlUtils.parseString);
+  if (value) {
+    return Number.parseInt(value, 10);
+  }
+  return undefined;
 }
 
 function buildTrack(
@@ -309,43 +313,52 @@ function buildTrack(
       XmlUtils.attr(node, "width", XmlUtils.parseNumber),
     );
     asserts.assertExists(width, "width is mandatory");
+
     const height = Functional.findMap([representation, adaptationSet], (node) =>
       XmlUtils.attr(node, "height", XmlUtils.parseNumber),
     );
     asserts.assertExists(height, "height is mandatory");
-    const frameRate = Functional.findMap(
+
+    const frameRateStr = Functional.findMap(
       [representation, adaptationSet],
-      (node) => XmlUtils.attr(node, "frameRate", DashHelpers.parseFrameRate),
+      (node) => XmlUtils.attr(node, "frameRate", XmlUtils.parseString),
     );
+    asserts.assertExists(frameRateStr, "frameRate is mandatory");
+    const frameRate = DashHelpers.parseFrameRate(frameRateStr);
+    asserts.assertExists(frameRate, "frameRate cannot be parsed");
+
     return {
       id,
       type,
       width,
       height,
+      frameRate,
       bandwidth,
       segments: [],
       maxSegmentDuration: 0,
-      ...(frameRate !== undefined ? { frameRate } : {}),
     };
   }
   if (type === MediaType.AUDIO) {
     const sampleRate = Functional.findMap(
       [representation, adaptationSet],
-      (node) =>
-        XmlUtils.attr(node, "audioSamplingRate", DashHelpers.parseFirstNumber),
+      (node) => XmlUtils.attr(node, "audioSamplingRate", XmlUtils.parseNumber),
     );
+    asserts.assertExists(sampleRate, "sampleRate is mandatory");
+
     const channels = Functional.findMap(
       [representation, adaptationSet],
       (node) => readChannelCount(node),
     );
+    asserts.assertExists(channels, "channels is mandatory");
+
     return {
       id,
       type,
       bandwidth,
       segments: [],
       maxSegmentDuration: 0,
-      ...(channels !== undefined ? { channels } : {}),
-      ...(sampleRate !== undefined ? { sampleRate } : {}),
+      channels,
+      sampleRate,
     };
   }
   if (type === MediaType.SUBTITLE) {

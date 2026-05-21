@@ -141,7 +141,7 @@ export interface VideoTrack extends BaseTrack {
   /** Video height. */
   height: number;
   /** Frames per second. Decimal form (e.g. 30 or 29.97). */
-  frameRate?: number;
+  frameRate: number;
 }
 
 /**
@@ -152,9 +152,9 @@ export interface VideoTrack extends BaseTrack {
 export interface AudioTrack extends BaseTrack {
   type: MediaType.AUDIO;
   /** Channel count (e.g. 2 for stereo, 6 for 5.1). */
-  channels?: number;
+  channels: number;
   /** Sample rate in Hz. */
-  sampleRate?: number;
+  sampleRate: number;
 }
 
 /**
