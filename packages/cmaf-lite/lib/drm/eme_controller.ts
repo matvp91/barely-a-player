@@ -147,6 +147,9 @@ export class EmeController {
       return;
     }
     for (const ss of this.manifest_.switchingSets) {
+      if (ss.type !== MediaType.VIDEO && ss.type !== MediaType.AUDIO) {
+        continue;
+      }
       const info = ss.protection?.keySystems[this.keySystem_];
       if (!info?.pssh) {
         continue;

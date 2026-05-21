@@ -61,7 +61,6 @@ export interface BaseSwitchingSet {
   id: string;
   /** Codec string. */
   codec: string;
-  protection?: Protection;
 }
 
 /**
@@ -73,6 +72,8 @@ export interface VideoSwitchingSet extends BaseSwitchingSet {
   type: MediaType.VIDEO;
   /** Video tracks. */
   tracks: VideoTrack[];
+  /** Protection. */
+  protection: Protection | null;
 }
 
 /**
@@ -86,6 +87,8 @@ export interface AudioSwitchingSet extends BaseSwitchingSet {
   language: string;
   /** Audio tracks. */
   tracks: AudioTrack[];
+  /** Protection. */
+  protection: Protection | null;
 }
 
 /**

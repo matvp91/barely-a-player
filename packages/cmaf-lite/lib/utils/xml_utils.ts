@@ -41,6 +41,25 @@ export function attr<T>(
   return defaultValue;
 }
 
+/**
+ * Return the first defined attribute value across the given nodes, in order.
+ * Useful for DASH attributes that may be declared on a Representation and
+ * inherited from the AdaptationSet.
+ */
+export function inheritedAttr<T>(
+  nodes: txml.TNode[],
+  name: string,
+  parser: AttrParser<T>,
+): T | undefined {
+  for (const node of nodes) {
+    const value = attr(node, name, parser);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 export function attrRequired<T>(
   node: txml.TNode,
   name: string,

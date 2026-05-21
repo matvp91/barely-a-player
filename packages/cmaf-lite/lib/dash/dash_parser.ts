@@ -53,7 +53,7 @@ function readMpd(
 
   const type = XmlUtils.attr(mpd, "type", XmlUtils.parseString);
   manifest.isLive = type === "dynamic";
-  const timing = DashHelpers.resolveTiming(manifest.switchingSets);
+  const timing = DashHelpers.getSwitchingSetTiming(manifest.switchingSets);
   manifest.start = timing.firstSegmentStart;
   manifest.end = timing.lastSegmentEnd;
 
@@ -246,7 +246,7 @@ function parseAdaptationSet(
       id,
       type,
       codec,
-      ...(protection ? { protection } : {}),
+      protection,
       tracks: [],
     };
   }
@@ -257,7 +257,7 @@ function parseAdaptationSet(
       type,
       codec,
       language,
-      ...(protection ? { protection } : {}),
+      protection,
       tracks: [],
     };
   }
@@ -309,19 +309,21 @@ function buildTrack(
   );
 
   if (type === MediaType.VIDEO) {
-    const width = Functional.findMap([representation, adaptationSet], (node) =>
-      XmlUtils.attr(node, "width", XmlUtils.parseNumber),
-    );
+    const nodes = [representation, adaptationSet];
+    const width = XmlUtils.inheritedAttr(nodes, "width", XmlUtils.parseNumber);
     asserts.assertExists(width, "width is mandatory");
 
-    const height = Functional.findMap([representation, adaptationSet], (node) =>
-      XmlUtils.attr(node, "height", XmlUtils.parseNumber),
+    const height = XmlUtils.inheritedAttr(
+      nodes,
+      "height",
+      XmlUtils.parseNumber,
     );
     asserts.assertExists(height, "height is mandatory");
 
-    const frameRateStr = Functional.findMap(
-      [representation, adaptationSet],
-      (node) => XmlUtils.attr(node, "frameRate", XmlUtils.parseString),
+    const frameRateStr = XmlUtils.inheritedAttr(
+      nodes,
+      "frameRate",
+      XmlUtils.parseString,
     );
     asserts.assertExists(frameRateStr, "frameRate is mandatory");
     const frameRate = DashHelpers.parseFrameRate(frameRateStr);
@@ -339,9 +341,10 @@ function buildTrack(
     };
   }
   if (type === MediaType.AUDIO) {
-    const sampleRate = Functional.findMap(
+    const sampleRate = XmlUtils.inheritedAttr(
       [representation, adaptationSet],
-      (node) => XmlUtils.attr(node, "audioSamplingRate", XmlUtils.parseNumber),
+      "audioSamplingRate",
+      XmlUtils.parseNumber,
     );
     asserts.assertExists(sampleRate, "sampleRate is mandatory");
 
@@ -452,10 +455,11 @@ function appendSegments(
   const timeline = XmlUtils.child(segmentTemplate, "SegmentTimeline");
   if (timeline) {
     const entries = XmlUtils.children(timeline, "S");
-    const firstT = entries[0]
-      ? XmlUtils.attr(entries[0], "t", XmlUtils.parseNumber, 0)
+    const firstEntry = entries[0];
+    const firstT = firstEntry
+      ? XmlUtils.attr(firstEntry, "t", XmlUtils.parseNumber, 0)
       : 0;
-    const firstAvailableStart = entries[0]
+    const firstAvailableStart = firstEntry
       ? (firstT - presentationTimeOffset) / timescale + periodStart
       : periodStart;
 

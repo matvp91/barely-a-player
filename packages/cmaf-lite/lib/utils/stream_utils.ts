@@ -180,10 +180,13 @@ function candidateKeySystems(
   switchingSet: SwitchingSet,
   drm: DrmConfig,
 ): KeySystem[] {
-  if (!switchingSet.protection) {
-    return [];
+  if (
+    switchingSet.type === MediaType.AUDIO ||
+    switchingSet.type === MediaType.VIDEO
+  ) {
+    return [...drm.preferredKeySystems];
   }
-  return [...drm.preferredKeySystems];
+  return [];
 }
 
 const DEFAULT_VIDEO_FRAMERATE = 30;

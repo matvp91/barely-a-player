@@ -17,6 +17,17 @@ import * as LanguageUtils from "../utils/language_utils";
 import * as UrlUtils from "../utils/url_utils";
 import * as XmlUtils from "../utils/xml_utils";
 
+export function getSwitchingSetTiming(switchingSets: SwitchingSet[]) {
+  const lastSegmentEnd = switchingSets[0]?.tracks[0]?.segments.at(-1)?.end;
+  asserts.assertExists(lastSegmentEnd, "Cannot resolve end");
+  const firstSegmentStart = switchingSets[0]?.tracks[0]?.segments.at(0)?.start;
+  asserts.assertExists(firstSegmentStart, "Cannot resolve start");
+  return {
+    firstSegmentStart,
+    lastSegmentEnd,
+  };
+}
+
 export function resolveType(
   adaptationSet: txml.TNode,
   representations: txml.TNode[],
@@ -59,9 +70,10 @@ export function resolveCodec(
   const firstRepresentation = representations[0];
   asserts.assertExists(firstRepresentation, "No Representation found");
 
-  const codec = Functional.findMap(
+  const codec = XmlUtils.inheritedAttr(
     [firstRepresentation, adaptationSet],
-    (node) => XmlUtils.attr(node, "codecs", XmlUtils.parseString),
+    "codecs",
+    XmlUtils.parseString,
   );
   asserts.assertExists(codec, "codecs is mandatory");
 
@@ -84,7 +96,7 @@ export function resolveSegmentTemplate(
   }
 
   const attributes: Record<string, string | null> = {};
-  for (const template of templates.slice().reverse()) {
+  for (const template of templates.toReversed()) {
     Object.assign(attributes, template.attributes);
   }
 
@@ -106,13 +118,11 @@ export function resolveBaseUrl(
   adaptationSet: txml.TNode,
   representation: txml.TNode,
 ): string {
-  const baseUrls = [mpd, period, adaptationSet, representation].flatMap(
+  const maybeUrls = [mpd, period, adaptationSet, representation].flatMap(
     (node) => XmlUtils.children(node, "BaseURL").map(XmlUtils.text),
   );
-  return UrlUtils.resolveUrls([
-    sourceUrl,
-    ...baseUrls.filter((url): url is string => url != null),
-  ]);
+  const urls = maybeUrls.filter((url) => url !== undefined);
+  return UrlUtils.resolveUrls([sourceUrl, ...urls]);
 }
 
 export function resolvePeriodDuration(
@@ -148,17 +158,6 @@ export function resolvePeriodDuration(
   }
 
   return null;
-}
-
-export function resolveTiming(switchingSets: SwitchingSet[]) {
-  const lastSegmentEnd = switchingSets[0]?.tracks[0]?.segments.at(-1)?.end;
-  asserts.assertExists(lastSegmentEnd, "Cannot resolve end");
-  const firstSegmentStart = switchingSets[0]?.tracks[0]?.segments.at(0)?.start;
-  asserts.assertExists(firstSegmentStart, "Cannot resolve start");
-  return {
-    firstSegmentStart,
-    lastSegmentEnd,
-  };
 }
 
 export function resolveLanguage(node: txml.TNode) {
@@ -208,8 +207,7 @@ export function resolveProtection(
       continue;
     }
     const value = XmlUtils.attr(el, "value", XmlUtils.parseString);
-    const psshNode = XmlUtils.children(el, "cenc:pssh")[0];
-    const psshText = psshNode ? XmlUtils.text(psshNode) : undefined;
+    const psshText = XmlUtils.text(XmlUtils.child(el, "cenc:pssh"));
     keySystems[keySystem] = keySystemInfoFromRaw(
       keySystem,
       value ?? undefined,
