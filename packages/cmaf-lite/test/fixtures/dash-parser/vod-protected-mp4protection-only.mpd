@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011"
+     xmlns:cenc="urn:mpeg:cenc:2013"
+     type="static"
+     mediaPresentationDuration="PT60S"
+     minBufferTime="PT4S">
+  <Period>
+    <AdaptationSet contentType="video" mimeType="video/mp4" codecs="avc1.64001f">
+      <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc"
+                         cenc:default_KID="ABCDEF01-2345-6789-ABCD-EF0123456789"/>
+      <ContentProtection schemeIdUri="urn:uuid:01020304-0506-0708-0900-aabbccddeeff">
+        <cenc:pssh>QUJD</cenc:pssh>
+      </ContentProtection>
+      <SegmentTemplate timescale="1" duration="4" startNumber="1" media="$RepresentationID$/$Number$.m4s" initialization="$RepresentationID$/init.mp4"/>
+      <Representation id="v1" bandwidth="2000000" width="1920" height="1080"/>
+    </AdaptationSet>
+  </Period>
+</MPD>

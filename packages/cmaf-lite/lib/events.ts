@@ -10,6 +10,7 @@ import type {
   Stream,
   VideoStream,
 } from ".";
+import type { KeySystem } from "./types/drm";
 
 /**
  * Event name constants emitted by the {@link Player}.
@@ -36,6 +37,8 @@ export const Events = {
   TIMELINE_UPDATED: "timelineUpdated",
   NETWORK_REQUEST: "networkRequest",
   NETWORK_RESPONSE: "networkResponse",
+  KEY_SESSION_CREATED: "keySessionCreated",
+  KEY_STATUSES_CHANGED: "keyStatusesChanged",
 } as const;
 
 /**
@@ -193,6 +196,26 @@ export interface NetworkResponseEvent {
 }
 
 /**
+ * Fired when EmeController creates a new MediaKeySession.
+ *
+ * @public
+ */
+export interface KeySessionCreatedEvent {
+  keySystem: KeySystem;
+  sessionId: string;
+}
+
+/**
+ * Fired when a session's key statuses change.
+ *
+ * @public
+ */
+export interface KeyStatusesChangedEvent {
+  sessionId: string;
+  statuses: Map<string, MediaKeyStatus>;
+}
+
+/**
  * Maps each event name to its listener signature.
  *
  * @public
@@ -217,4 +240,6 @@ export interface EventMap {
   [Events.TIMELINE_UPDATED]: undefined;
   [Events.NETWORK_REQUEST]: (event: NetworkRequestEvent) => void;
   [Events.NETWORK_RESPONSE]: (event: NetworkResponseEvent) => void;
+  [Events.KEY_SESSION_CREATED]: (event: KeySessionCreatedEvent) => void;
+  [Events.KEY_STATUSES_CHANGED]: (event: KeyStatusesChangedEvent) => void;
 }

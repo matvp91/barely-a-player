@@ -8,6 +8,7 @@ import type { NetworkResponse } from "../net/network_response";
 export enum NetworkRequestType {
   MANIFEST = "manifest",
   SEGMENT = "segment",
+  LICENSE = "license",
 }
 
 /**

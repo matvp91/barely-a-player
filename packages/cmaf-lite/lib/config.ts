@@ -1,3 +1,4 @@
+import { KeySystem } from "./types/drm";
 import type { Path, PathValue } from "./types/helpers";
 import type { Preference } from "./types/media";
 import type { NetworkRequestOptions } from "./types/net";
@@ -55,6 +56,27 @@ export interface AbrConfig {
 }
 
 /**
+ * DRM configuration.
+ *
+ * @public
+ */
+export interface DrmConfig {
+  /**
+   * Order in which to probe key systems for protected content.
+   * The first key system supported on the device (and present in
+   * the manifest) is selected.
+   */
+  preferredKeySystems: KeySystem[];
+  /** License server URL per key system. */
+  licenseUrls: Partial<Record<KeySystem, string>>;
+  /**
+   * Server certificate per key system, applied before the first
+   * license challenge.
+   */
+  serverCertificates: Partial<Record<KeySystem, Uint8Array>>;
+}
+
+/**
  * Player configuration. Override defaults via
  * `Player.setConfig`.
  *
@@ -106,6 +128,8 @@ export interface PlayerConfig {
   abr: AbrConfig;
   /** Preferences */
   preferences: Preference[];
+  /** DRM configuration. */
+  drm: DrmConfig;
 }
 
 /**
@@ -139,4 +163,13 @@ export const DEFAULT_CONFIG: PlayerConfig = {
     minTotalBytes: 128_000,
   },
   preferences: [],
+  drm: {
+    preferredKeySystems: [
+      KeySystem.FAIRPLAY,
+      KeySystem.WIDEVINE,
+      KeySystem.PLAYREADY,
+    ],
+    licenseUrls: {},
+    serverCertificates: {},
+  },
 };

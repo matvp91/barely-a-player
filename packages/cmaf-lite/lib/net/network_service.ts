@@ -30,9 +30,23 @@ export class NetworkService {
     type: NetworkRequestType,
     url: string,
     options?: NetworkRequestOptions,
+    init?: {
+      method?: "GET" | "POST";
+      headers?: Headers;
+      body?: BodyInit | null;
+    },
   ): NetworkRequest {
     const promise = Promise.withResolvers<AbortableNetworkResponse>();
     const request = new NetworkRequest(url, promise.promise, options);
+    if (init?.method) {
+      request.method = init.method;
+    }
+    if (init?.headers) {
+      request.headers = init.headers;
+    }
+    if (init?.body !== undefined) {
+      request.body = init.body;
+    }
 
     this.fetchWithRetry_(type, request, promise);
 
@@ -161,6 +175,7 @@ export class NetworkService {
     const res = await fetch(request.url, {
       method: request.method,
       headers: request.headers,
+      body: request.body,
       signal: request[ABORT_CONTROLLER].signal,
     });
 

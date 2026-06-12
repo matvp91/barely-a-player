@@ -1,4 +1,8 @@
-import type { PROP_DECODING_INFO, PROP_HIERARCHY } from "../constants";
+import type {
+  PROP_DECODING_INFO,
+  PROP_HIERARCHY,
+  PROP_KEY_SYSTEM_ACCESS,
+} from "../constants";
 import type { SwitchingSet, Track } from "./manifest";
 
 /**
@@ -57,6 +61,7 @@ export interface VideoStream extends BaseStream {
   height: number;
   [PROP_HIERARCHY]: StreamHierarchy<MediaType.VIDEO>;
   [PROP_DECODING_INFO]: MediaCapabilitiesDecodingInfo;
+  [PROP_KEY_SYSTEM_ACCESS]?: MediaKeySystemAccess;
 }
 
 /**
@@ -70,6 +75,7 @@ export interface AudioStream extends BaseStream {
   language: string;
   [PROP_HIERARCHY]: StreamHierarchy<MediaType.AUDIO>;
   [PROP_DECODING_INFO]: MediaCapabilitiesDecodingInfo;
+  [PROP_KEY_SYSTEM_ACCESS]?: MediaKeySystemAccess;
 }
 
 /**

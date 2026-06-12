@@ -3,6 +3,7 @@ import { AbrController } from "./abr/abr_controller";
 import type { ConfigPath, ConfigPathValue, PlayerConfig } from "./config";
 import { DEFAULT_CONFIG } from "./config";
 import { EMPTY_ARRAY, EMPTY_MANIFEST, EMPTY_TIME_RANGES } from "./constants";
+import { EmeController } from "./drm/eme_controller";
 import type { EventMap } from "./events";
 import { Events } from "./events";
 import { ManifestController } from "./manifest/manifest_controller";
@@ -32,6 +33,7 @@ export class Player extends EventEmitter<EventMap> {
   private bufferController_: BufferController;
   private gapController_: GapController;
   private streamController_: StreamController;
+  private emeController_: EmeController;
   private abrController_: AbrController;
   private timelineController_: TimelineController;
 
@@ -44,6 +46,7 @@ export class Player extends EventEmitter<EventMap> {
     this.bufferController_ = new BufferController(this);
     this.gapController_ = new GapController(this);
     this.streamController_ = new StreamController(this);
+    this.emeController_ = new EmeController(this);
     this.abrController_ = new AbrController(this);
     this.timelineController_ = new TimelineController(this);
   }
@@ -178,6 +181,7 @@ export class Player extends EventEmitter<EventMap> {
     this.bufferController_.destroy();
     this.gapController_.destroy();
     this.streamController_.destroy();
+    this.emeController_.destroy();
     this.abrController_.destroy();
     this.timelineController_.destroy();
     this.removeAllListeners();

@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../../lib/constants";
+import {
+  PROP_DECODING_INFO,
+  PROP_HIERARCHY,
+  PROP_KEY_SYSTEM_ACCESS,
+} from "../../lib/constants";
+import { KeySystem } from "../../lib/types/drm";
 import type {
   AudioStream,
   Preference,
@@ -7,6 +12,7 @@ import type {
 } from "../../lib/types/media";
 import { MediaType } from "../../lib/types/media";
 import {
+  buildDecodingConfig,
   buildStreams,
   findStreamsMatchingPreferences,
   pickClosestByBandwidth,
@@ -15,10 +21,13 @@ import {
   createAudioSwitchingSet,
   createAudioTrack,
   createDecodingInfo,
+  createKeySystemAccess,
   createManifest,
+  createProtection,
   createSubtitleSwitchingSet,
   createVideoSwitchingSet,
   createVideoTrack,
+  DEFAULT_CONFIG,
   mockMediaCapabilities,
 } from "../__framework__/factories";
 
@@ -51,7 +60,8 @@ describe("findStreamsMatchingPreferences", () => {
         }),
       ],
     });
-    const list = (await buildStreams(manifest)).get(MediaType.VIDEO) ?? [];
+    const list =
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     return list.filter((s): s is VideoStream => s.type === MediaType.VIDEO);
   };
 
@@ -147,7 +157,8 @@ describe("pickClosestByBandwidth", () => {
         }),
       ],
     });
-    const list = (await buildStreams(manifest)).get(MediaType.VIDEO) ?? [];
+    const list =
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     return list.filter((s): s is VideoStream => s.type === MediaType.VIDEO);
   };
 
@@ -185,14 +196,14 @@ describe("StreamUtils", () => {
   describe("buildStreams", () => {
     it("extracts one stream per unique type and resolution", async () => {
       const manifest = createManifest();
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       expect(streams.get(MediaType.VIDEO)).toHaveLength(1);
       expect(streams.get(MediaType.AUDIO)).toHaveLength(1);
     });
 
     it("wires hierarchy to the manifest's own switching set and track", async () => {
       const manifest = createManifest();
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const videoStream = streams.get(MediaType.VIDEO)![0]!;
       const expectedSwitchingSet = manifest.switchingSets.find(
         (ss) => ss.type === MediaType.VIDEO,
@@ -227,7 +238,7 @@ describe("StreamUtils", () => {
           }),
         ],
       });
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const video = streams.get(MediaType.VIDEO)!;
       const bandwidths = video.map((s) => s.bandwidth);
       expect(bandwidths).toEqual([1_000_000, 3_000_000, 5_000_000]);
@@ -244,7 +255,7 @@ describe("StreamUtils", () => {
           }),
         ],
       });
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       expect(streams.get(MediaType.VIDEO)).toHaveLength(2);
     });
 
@@ -252,7 +263,7 @@ describe("StreamUtils", () => {
       const info = createDecodingInfo();
       mockMediaCapabilities(info);
       const manifest = createManifest();
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const video = streams.get(MediaType.VIDEO) ?? [];
       const audio = streams.get(MediaType.AUDIO) ?? [];
       expect(video).toHaveLength(1);
@@ -282,7 +293,7 @@ describe("StreamUtils", () => {
         const bitrate = config.video?.bitrate ?? 0;
         return createDecodingInfo({ supported: bitrate < 1_000_000 });
       });
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const video = streams.get(MediaType.VIDEO) ?? [];
       expect(video).toHaveLength(1);
       expect(video[0]!.bandwidth).toBe(500_000);
@@ -308,7 +319,7 @@ describe("StreamUtils", () => {
         const codecs = config.video?.contentType ?? "";
         return createDecodingInfo({ supported: codecs.includes("avc1") });
       });
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const video = streams.get(MediaType.VIDEO) ?? [];
       expect(video).toHaveLength(1);
       expect(video[0]!.codec).toBe("avc");
@@ -319,7 +330,7 @@ describe("StreamUtils", () => {
       const manifest = createManifest({
         switchingSets: [createVideoSwitchingSet()],
       });
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       expect(streams.get(MediaType.VIDEO) ?? []).toEqual([]);
     });
 
@@ -329,7 +340,7 @@ describe("StreamUtils", () => {
         createDecodingInfo({ supported: config.audio === undefined }),
       );
       const manifest = createManifest();
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       expect(streams.get(MediaType.AUDIO) ?? []).toEqual([]);
       // Video must still be present.
       expect((streams.get(MediaType.VIDEO) ?? []).length).toBe(1);
@@ -344,7 +355,7 @@ describe("StreamUtils", () => {
           createSubtitleSwitchingSet(),
         ],
       });
-      const streams = await buildStreams(manifest);
+      const streams = await buildStreams(manifest, DEFAULT_CONFIG);
       const subtitles = streams.get(MediaType.SUBTITLE) ?? [];
       expect(subtitles).toHaveLength(1);
       // Subtitle stream must not carry PROP_DECODING_INFO.
@@ -369,7 +380,7 @@ describe("StreamUtils", () => {
           }),
         ],
       });
-      await buildStreams(manifest);
+      await buildStreams(manifest, DEFAULT_CONFIG);
       expect(spy).toHaveBeenCalledWith({
         type: "media-source",
         video: {
@@ -392,7 +403,7 @@ describe("StreamUtils", () => {
           }),
         ],
       });
-      await buildStreams(manifest);
+      await buildStreams(manifest, DEFAULT_CONFIG);
       expect(spy).toHaveBeenCalledWith({
         type: "media-source",
         audio: {
@@ -403,5 +414,202 @@ describe("StreamUtils", () => {
         },
       });
     });
+  });
+});
+
+describe("buildDecodingConfig", () => {
+  it("builds a clear-content video config using getContentType and track metadata", () => {
+    const track = createVideoTrack({
+      width: 1920,
+      height: 1080,
+      bandwidth: 5_000_000,
+      frameRate: 29.97,
+    });
+    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
+    const config = buildDecodingConfig(track, switchingSet);
+    expect(config).toEqual({
+      type: "media-source",
+      video: {
+        contentType: 'video/mp4; codecs="avc1.640028"',
+        width: 1920,
+        height: 1080,
+        bitrate: 5_000_000,
+        framerate: 29.97,
+      },
+    });
+  });
+
+  it("falls back to default framerate when track does not declare one", () => {
+    const track = createVideoTrack({
+      bandwidth: 2_000_000,
+      width: 1280,
+      height: 720,
+    });
+    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
+    const config = buildDecodingConfig(track, switchingSet);
+    expect(config.video?.framerate).toBe(30);
+  });
+
+  it("builds an audio config using track channels and sampleRate", () => {
+    const track = createAudioTrack({
+      bandwidth: 128_000,
+      channels: 6,
+      sampleRate: 44_100,
+    });
+    const switchingSet = createAudioSwitchingSet({ codec: "mp4a.40.2" });
+    const config = buildDecodingConfig(track, switchingSet);
+    expect(config).toEqual({
+      type: "media-source",
+      audio: {
+        contentType: 'audio/mp4; codecs="mp4a.40.2"',
+        bitrate: 128_000,
+        channels: "6",
+        samplerate: 44_100,
+      },
+    });
+  });
+
+  it("falls back to default channels and samplerate when track lacks them", () => {
+    const track = createAudioTrack({ bandwidth: 128_000 });
+    const switchingSet = createAudioSwitchingSet({ codec: "mp4a.40.2" });
+    const config = buildDecodingConfig(track, switchingSet);
+    expect(config.audio?.channels).toBe("2");
+    expect(config.audio?.samplerate).toBe(48_000);
+  });
+
+  it("attaches a keySystemConfiguration when a key system is provided", () => {
+    const track = createVideoTrack({
+      width: 1920,
+      height: 1080,
+      bandwidth: 5_000_000,
+    });
+    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
+    const config = buildDecodingConfig(
+      track,
+      switchingSet,
+      KeySystem.WIDEVINE,
+    ) as MediaDecodingConfiguration & {
+      keySystemConfiguration: MediaKeySystemConfiguration & {
+        keySystem: string;
+      };
+    };
+    expect(config.keySystemConfiguration.keySystem).toBe(KeySystem.WIDEVINE);
+    expect(config.keySystemConfiguration.videoCapabilities![0]).toEqual({
+      contentType: 'video/mp4; codecs="avc1.640028"',
+      robustness: "SW_SECURE_CRYPTO",
+    });
+    expect(config.keySystemConfiguration.initDataTypes).toEqual(["cenc"]);
+    expect(config.keySystemConfiguration.audioCapabilities).toBeUndefined();
+  });
+
+  it("uses audioCapabilities for an audio key system probe", () => {
+    const track = createAudioTrack({ bandwidth: 128_000 });
+    const switchingSet = createAudioSwitchingSet({ codec: "mp4a.40.2" });
+    const config = buildDecodingConfig(
+      track,
+      switchingSet,
+      KeySystem.WIDEVINE,
+    ) as MediaDecodingConfiguration & {
+      keySystemConfiguration: MediaKeySystemConfiguration & {
+        keySystem: string;
+      };
+    };
+    expect(config.keySystemConfiguration.audioCapabilities![0]).toEqual({
+      contentType: 'audio/mp4; codecs="mp4a.40.2"',
+      robustness: "SW_SECURE_CRYPTO",
+    });
+    expect(config.keySystemConfiguration.videoCapabilities).toBeUndefined();
+  });
+});
+
+describe("buildStreams (protected)", () => {
+  it("returns the first key system that probes supported, in preferredKeySystems order", async () => {
+    const spy = mockMediaCapabilities();
+    spy.mockImplementation(async (cfg: MediaDecodingConfiguration) => {
+      const ks = (
+        cfg as MediaDecodingConfiguration & {
+          keySystemConfiguration?: MediaKeySystemConfiguration;
+        }
+      ).keySystemConfiguration;
+      const robustness = ks?.videoCapabilities?.[0]?.robustness;
+      if (robustness === "SW_SECURE_CRYPTO") {
+        return createDecodingInfo({
+          keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+        });
+      }
+      return createDecodingInfo({ supported: false, keySystemAccess: null });
+    });
+
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({
+          protection: createProtection({
+            keySystems: {
+              [KeySystem.FAIRPLAY]: { contentId: "skd://x" },
+              [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+            },
+          }),
+        }),
+      ],
+    });
+    const list =
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
+    expect(list).toHaveLength(1);
+    const video = list[0] as VideoStream;
+    expect(video[PROP_KEY_SYSTEM_ACCESS]?.keySystem).toBe(KeySystem.WIDEVINE);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("probes configured key systems even when manifest protection lists different ones", async () => {
+    const spy = mockMediaCapabilities();
+    spy.mockImplementation(async (cfg: MediaDecodingConfiguration) => {
+      const ks = (
+        cfg as MediaDecodingConfiguration & {
+          keySystemConfiguration?: { keySystem?: string };
+        }
+      ).keySystemConfiguration;
+      if (ks?.keySystem === KeySystem.WIDEVINE) {
+        return createDecodingInfo({
+          keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+        });
+      }
+      return createDecodingInfo({ supported: false, keySystemAccess: null });
+    });
+
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({
+          protection: createProtection({
+            keySystems: {
+              [KeySystem.PLAYREADY]: {},
+            },
+          }),
+        }),
+      ],
+    });
+
+    const config = {
+      ...DEFAULT_CONFIG,
+      drm: { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
+    };
+    const list =
+      (await buildStreams(manifest, config)).get(MediaType.VIDEO) ?? [];
+    expect(list).toHaveLength(1);
+    const video = list[0] as VideoStream;
+    expect(video[PROP_KEY_SYSTEM_ACCESS]?.keySystem).toBe(KeySystem.WIDEVINE);
+  });
+
+  it("drops streams when no preferred key system is supported", async () => {
+    mockMediaCapabilities(
+      createDecodingInfo({ supported: false, keySystemAccess: null }),
+    );
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({ protection: createProtection() }),
+      ],
+    });
+    const list =
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
+    expect(list).toHaveLength(0);
   });
 });

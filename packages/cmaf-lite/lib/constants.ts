@@ -21,3 +21,4 @@ export const EMPTY_MANIFEST: Manifest = {
 
 export const PROP_HIERARCHY = Symbol("hierarchy");
 export const PROP_DECODING_INFO = Symbol("decodingInfo");
+export const PROP_KEY_SYSTEM_ACCESS = Symbol("keySystemAccess");

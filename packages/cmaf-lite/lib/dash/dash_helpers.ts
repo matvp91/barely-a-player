@@ -1,11 +1,32 @@
 import type * as txml from "txml";
-import type { SwitchingSet } from "../types/manifest";
+import {
+  keySystemFromSchemeIdUri,
+  keySystemInfoFromRaw,
+} from "../drm/drm_utils";
+import type { KeySystem } from "../types/drm";
+import { EncryptionScheme } from "../types/drm";
+import type {
+  KeySystemInfo,
+  Protection,
+  SwitchingSet,
+} from "../types/manifest";
 import { MediaType } from "../types/media";
 import * as asserts from "../utils/asserts";
 import * as Functional from "../utils/functional";
 import * as LanguageUtils from "../utils/language_utils";
 import * as UrlUtils from "../utils/url_utils";
 import * as XmlUtils from "../utils/xml_utils";
+
+export function getSwitchingSetTiming(switchingSets: SwitchingSet[]) {
+  const lastSegmentEnd = switchingSets[0]?.tracks[0]?.segments.at(-1)?.end;
+  asserts.assertExists(lastSegmentEnd, "Cannot resolve end");
+  const firstSegmentStart = switchingSets[0]?.tracks[0]?.segments.at(0)?.start;
+  asserts.assertExists(firstSegmentStart, "Cannot resolve start");
+  return {
+    firstSegmentStart,
+    lastSegmentEnd,
+  };
+}
 
 export function resolveType(
   adaptationSet: txml.TNode,
@@ -74,7 +95,7 @@ export function resolveSegmentTemplate(
   }
 
   const attributes: Record<string, string | null> = {};
-  for (const template of templates.slice().reverse()) {
+  for (const template of templates.toReversed()) {
     Object.assign(attributes, template.attributes);
   }
 
@@ -96,13 +117,11 @@ export function resolveBaseUrl(
   adaptationSet: txml.TNode,
   representation: txml.TNode,
 ): string {
-  const baseUrls = [mpd, period, adaptationSet, representation].flatMap(
+  const maybeUrls = [mpd, period, adaptationSet, representation].flatMap(
     (node) => XmlUtils.children(node, "BaseURL").map(XmlUtils.text),
   );
-  return UrlUtils.resolveUrls([
-    sourceUrl,
-    ...baseUrls.filter((url): url is string => url != null),
-  ]);
+  const urls = maybeUrls.filter((url) => url !== undefined);
+  return UrlUtils.resolveUrls([sourceUrl, ...urls]);
 }
 
 export function resolvePeriodDuration(
@@ -140,19 +159,86 @@ export function resolvePeriodDuration(
   return null;
 }
 
-export function resolveTiming(switchingSets: SwitchingSet[]) {
-  const lastSegmentEnd = switchingSets[0]?.tracks[0]?.segments.at(-1)?.end;
-  asserts.assertExists(lastSegmentEnd, "Cannot resolve end");
-  const firstSegmentStart = switchingSets[0]?.tracks[0]?.segments.at(0)?.start;
-  asserts.assertExists(firstSegmentStart, "Cannot resolve start");
-  return {
-    firstSegmentStart,
-    lastSegmentEnd,
-  };
-}
-
 export function resolveLanguage(node: txml.TNode) {
   const lang = XmlUtils.attr(node, "lang", XmlUtils.parseString);
   // TODO(matvp): Make language nullable instead of defaulting to unk.
   return lang && lang !== "und" ? LanguageUtils.toBCP47(lang) : "unk";
+}
+
+export function resolveProtection(
+  adaptationSet: txml.TNode,
+  representations: txml.TNode[],
+): Protection | null {
+  const firstRepresentation = representations[0];
+  const nodes = Functional.firstNonEmpty([
+    XmlUtils.children(adaptationSet, "ContentProtection"),
+    firstRepresentation &&
+      XmlUtils.children(firstRepresentation, "ContentProtection"),
+  ]);
+
+  if (nodes.length === 0) {
+    return null;
+  }
+
+  let scheme: EncryptionScheme | null = null;
+  let defaultKid: string | null = null;
+  const keySystems: Partial<Record<KeySystem, KeySystemInfo>> = {};
+
+  for (const node of nodes) {
+    const schemeIdUri = XmlUtils.attr(
+      node,
+      "schemeIdUri",
+      XmlUtils.parseString,
+    );
+    if (!schemeIdUri) {
+      continue;
+    }
+
+    // DASH scheme URN for the mp4protection element that carries scheme
+    // and default_KID.
+    if (schemeIdUri === "urn:mpeg:dash:mp4protection:2011") {
+      const value = XmlUtils.attr(node, "value", XmlUtils.parseString);
+      if (value === EncryptionScheme.CENC || value === EncryptionScheme.CBCS) {
+        scheme = value;
+      }
+      const kid = XmlUtils.attr(node, "cenc:default_KID", XmlUtils.parseString);
+      if (kid) {
+        defaultKid = kid.toLowerCase();
+      }
+      continue;
+    }
+
+    const keySystem = keySystemFromSchemeIdUri(schemeIdUri);
+    if (!keySystem) {
+      continue;
+    }
+
+    const value = XmlUtils.attr(node, "value", XmlUtils.parseString);
+    const psshText = XmlUtils.text(XmlUtils.child(node, "cenc:pssh"));
+    keySystems[keySystem] = keySystemInfoFromRaw(keySystem, value, psshText);
+  }
+
+  asserts.assertExists(scheme, "Missing scheme");
+  asserts.assertExists(defaultKid, "Missing cenc:default_KID");
+
+  return { scheme, defaultKid, keySystems };
+}
+
+export function resolveChannelCount(node: txml.TNode): number | undefined {
+  const acc = XmlUtils.child(node, "AudioChannelConfiguration");
+  if (!acc) {
+    return undefined;
+  }
+  const scheme = XmlUtils.attr(acc, "schemeIdUri", XmlUtils.parseString);
+  if (
+    scheme !== "urn:mpeg:dash:23003:3:audio_channel_configuration:2011" &&
+    scheme !== "urn:mpeg:mpegB:cicp:ChannelConfiguration"
+  ) {
+    return undefined;
+  }
+  const value = XmlUtils.attr(acc, "value", XmlUtils.parseString);
+  if (!value) {
+    return undefined;
+  }
+  return Number.parseInt(value, 10);
 }

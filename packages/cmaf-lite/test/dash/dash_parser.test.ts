@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as DashParser from "../../lib/dash/dash_parser";
+import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
+import type { AudioTrack, VideoTrack } from "../../lib/types/manifest";
 import { MediaType } from "../../lib/types/media";
 import { loadFixture } from "../fixtures";
 import { findAudio, findSubtitle, findVideo } from "./helpers";
@@ -156,6 +158,101 @@ describe("DashParser", () => {
       );
       expect(manifest.switchingSets).toHaveLength(1);
       expect(manifest.switchingSets[0]!.type).toBe(MediaType.VIDEO);
+    });
+  });
+
+  describe("frameRate", () => {
+    it("parses frameRate as a decimal integer", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-framerate-integer.mpd"),
+        sourceUrl,
+      );
+      const track = findVideo(manifest).tracks[0]! as VideoTrack;
+      expect(track.frameRate).toBe(30);
+    });
+
+    it("parses frameRate in fractional form", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-framerate-fractional.mpd"),
+        sourceUrl,
+      );
+      const track = findVideo(manifest).tracks[0]! as VideoTrack;
+      expect(track.frameRate).toBeCloseTo(29.97, 2);
+    });
+
+    it("falls back to AdaptationSet frameRate when Representation lacks it", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-framerate-on-adaptation-set.mpd"),
+        sourceUrl,
+      );
+      const track = findVideo(manifest).tracks[0]! as VideoTrack;
+      expect(track.frameRate).toBe(24);
+    });
+
+    it("leaves frameRate undefined when neither node declares it", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-basic.mpd"),
+        sourceUrl,
+      );
+      const track = findVideo(manifest).tracks[0]! as VideoTrack;
+      expect(track.frameRate).toBeUndefined();
+    });
+  });
+
+  describe("audioSamplingRate and AudioChannelConfiguration", () => {
+    it("parses audioSamplingRate as a number when a single value is declared", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-samplerate-single.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.sampleRate).toBe(48000);
+    });
+
+    it("uses the first value when audioSamplingRate is space-separated", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-samplerate-multi.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.sampleRate).toBe(48000);
+    });
+
+    it("parses channel count from MPEG DASH AudioChannelConfiguration scheme", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-channels-mpeg-dash.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.channels).toBe(2);
+    });
+
+    it("parses channel count from MPEG CICP AudioChannelConfiguration scheme", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-channels-cicp.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.channels).toBe(6);
+    });
+
+    it("leaves channels undefined for an unknown AudioChannelConfiguration schemeIdUri", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-audio-channels-unknown-scheme.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.channels).toBeUndefined();
+    });
+
+    it("leaves sampleRate and channels undefined when neither node declares them", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-basic.mpd"),
+        sourceUrl,
+      );
+      const track = findAudio(manifest).tracks[0]! as AudioTrack;
+      expect(track.sampleRate).toBeUndefined();
+      expect(track.channels).toBeUndefined();
     });
   });
 
@@ -563,6 +660,64 @@ describe("DashParser", () => {
       expect(track.segments[1]).toBe(snapshot[2]);
       expect(track.segments[2]).toBe(snapshot[3]);
       expect(track.segments[3]).toBe(snapshot[4]);
+    });
+  });
+
+  describe("ContentProtection", () => {
+    it("attaches a protection model to the switching set when present", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-protected-widevine-playready.mpd"),
+        sourceUrl,
+      );
+      const video = findVideo(manifest);
+      expect(video.protection?.scheme).toBe(EncryptionScheme.CENC);
+      expect(video.protection?.defaultKid).toBe(
+        "abcdef01-2345-6789-abcd-ef0123456789",
+      );
+      expect(
+        video.protection?.keySystems[KeySystem.WIDEVINE]?.pssh,
+      ).toBeInstanceOf(Uint8Array);
+    });
+
+    it("leaves protection undefined on clear switching sets", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-basic.mpd"),
+        sourceUrl,
+      );
+      expect(findVideo(manifest).protection).toBeUndefined();
+    });
+
+    it("parses ContentProtection located on Representation elements", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-protected-representation-level.mpd"),
+        sourceUrl,
+      );
+      const video = findVideo(manifest);
+      expect(video.protection?.scheme).toBe(EncryptionScheme.CENC);
+      expect(
+        video.protection?.keySystems[KeySystem.WIDEVINE]?.pssh,
+      ).toBeInstanceOf(Uint8Array);
+    });
+
+    it("parses FairPlay contentId and cbcs scheme from the value attribute", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-protected-fairplay.mpd"),
+        sourceUrl,
+      );
+      const video = findVideo(manifest);
+      expect(video.protection?.scheme).toBe(EncryptionScheme.CBCS);
+      expect(video.protection?.keySystems[KeySystem.FAIRPLAY]?.contentId).toBe(
+        "skd://example/abc123",
+      );
+    });
+
+    it("throws when mp4protection is present but cenc:default_KID is missing", () => {
+      expect(() =>
+        DashParser.create(
+          loadFixture("dash-parser/vod-protected-no-default-kid.mpd"),
+          sourceUrl,
+        ),
+      ).toThrow(/default_KID/);
     });
   });
 

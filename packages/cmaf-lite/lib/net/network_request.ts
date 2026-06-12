@@ -13,8 +13,8 @@ export const ABORT_CONTROLLER = Symbol("abortController");
 /**
  * Mutable request descriptor. Listeners on
  * `NETWORK_REQUEST` can modify {@link NetworkRequest.url},
- * {@link NetworkRequest.method}, and {@link NetworkRequest.headers}
- * before each fetch attempt.
+ * {@link NetworkRequest.method}, {@link NetworkRequest.headers},
+ * and {@link NetworkRequest.body} before each fetch attempt.
  *
  * @public
  */
@@ -23,6 +23,8 @@ export class NetworkRequest {
   method: "GET" | "POST" = "GET";
   /** HTTP headers. Mutable before each attempt. */
   headers = new Headers();
+  /** HTTP body. Mutable before each attempt. `null` for GET. */
+  body: BodyInit | null = null;
   /** `true` while the request has not completed or been cancelled. */
   inFlight = true;
   /** Current attempt number (1-based after first fetch). */

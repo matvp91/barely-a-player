@@ -1,7 +1,11 @@
 import { vi } from "vitest";
+import type { DrmConfig, PlayerConfig } from "../../lib/config";
+import { DEFAULT_CONFIG as LIB_DEFAULT_CONFIG } from "../../lib/config";
+import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
 import type {
   InitSegment,
   Manifest,
+  Protection,
   Segment,
   SwitchingSet,
   Track,
@@ -153,3 +157,41 @@ export function mockMediaCapabilities(
     .spyOn(nav.mediaCapabilities!, "decodingInfo")
     .mockResolvedValue(info);
 }
+
+export function createProtection(overrides?: Partial<Protection>): Protection {
+  return {
+    scheme: EncryptionScheme.CENC,
+    defaultKid: "abcdef01-2345-6789-abcd-ef0123456789",
+    keySystems: {
+      [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1, 2, 3, 4]) },
+    },
+    ...overrides,
+  };
+}
+
+export function createKeySystemAccess(keySystem: string): MediaKeySystemAccess {
+  return {
+    keySystem,
+    getConfiguration: () => ({}) as MediaKeySystemConfiguration,
+    createMediaKeys: async () => ({}) as MediaKeys,
+  } as MediaKeySystemAccess;
+}
+
+export const DEFAULT_DRM_CONFIG: DrmConfig = {
+  preferredKeySystems: [
+    KeySystem.FAIRPLAY,
+    KeySystem.WIDEVINE,
+    KeySystem.PLAYREADY,
+  ],
+  licenseUrls: {},
+  serverCertificates: {},
+};
+
+/**
+ * Full PlayerConfig fixture for tests. Override individual slices by
+ * spreading: `{ ...DEFAULT_CONFIG, drm: { ...DEFAULT_DRM_CONFIG, ... } }`.
+ */
+export const DEFAULT_CONFIG: PlayerConfig = {
+  ...LIB_DEFAULT_CONFIG,
+  drm: DEFAULT_DRM_CONFIG,
+};

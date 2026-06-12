@@ -1,3 +1,4 @@
+import type { EncryptionScheme, KeySystem } from "./drm";
 import type { MediaType } from "./media";
 
 /**
@@ -6,6 +7,32 @@ import type { MediaType } from "./media";
  * @public
  */
 export const LANGUAGE_UNKNOWN = "unk";
+
+/**
+ * Encryption metadata.
+ *
+ * @public
+ */
+export interface Protection {
+  /** Encryption scheme. */
+  scheme: EncryptionScheme;
+  /** Default Key ID. */
+  defaultKid: string;
+  /** Per-key-system init material. */
+  keySystems: Partial<Record<KeySystem, KeySystemInfo>>;
+}
+
+/**
+ * Per-key-system init material.
+ *
+ * @public
+ */
+export interface KeySystemInfo {
+  /** CENC PSSH blob (Widevine, PlayReady). */
+  pssh?: Uint8Array;
+  /** FairPlay content identifier (from `skd://...`). */
+  contentId?: string;
+}
 
 /**
  * Parsed manifest representing a CMAF presentation.
@@ -45,6 +72,8 @@ export interface VideoSwitchingSet extends BaseSwitchingSet {
   type: MediaType.VIDEO;
   /** Video tracks. */
   tracks: VideoTrack[];
+  /** Protection. */
+  protection: Protection | null;
 }
 
 /**
@@ -58,6 +87,8 @@ export interface AudioSwitchingSet extends BaseSwitchingSet {
   language: string;
   /** Audio tracks. */
   tracks: AudioTrack[];
+  /** Protection. */
+  protection: Protection | null;
 }
 
 /**
@@ -112,6 +143,8 @@ export interface VideoTrack extends BaseTrack {
   width: number;
   /** Video height. */
   height: number;
+  /** Frames per second. Decimal form (e.g. 30 or 29.97). */
+  frameRate: number;
 }
 
 /**
@@ -121,6 +154,10 @@ export interface VideoTrack extends BaseTrack {
  */
 export interface AudioTrack extends BaseTrack {
   type: MediaType.AUDIO;
+  /** Channel count (e.g. 2 for stereo, 6 for 5.1). */
+  channels: number;
+  /** Sample rate in Hz. */
+  sampleRate: number;
 }
 
 /**

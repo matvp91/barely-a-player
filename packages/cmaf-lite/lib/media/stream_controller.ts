@@ -88,7 +88,10 @@ export class StreamController {
 
     if (!event.isUpdate) {
       // The initial manifest can be processed.
-      this.streams_ = await StreamUtils.buildStreams(event.manifest);
+      this.streams_ = await StreamUtils.buildStreams(
+        event.manifest,
+        this.player_.getConfig(),
+      );
       log.info("Streams", this.streams_);
       this.player_.emit(Events.STREAMS_CREATED);
       this.tryStart_();

@@ -53,7 +53,8 @@ function readMpd(
 
   const type = XmlUtils.attr(mpd, "type", XmlUtils.parseString);
   manifest.isLive = type === "dynamic";
-  const timing = DashHelpers.resolveTiming(manifest.switchingSets);
+
+  const timing = DashHelpers.getSwitchingSetTiming(manifest.switchingSets);
   manifest.start = timing.firstSegmentStart;
   manifest.end = timing.lastSegmentEnd;
 
@@ -236,12 +237,17 @@ function parseAdaptationSet(
 ): SwitchingSet {
   const type = DashHelpers.resolveType(adaptationSet, representations);
   const codec = DashHelpers.resolveCodec(adaptationSet, representations);
+  const protection = DashHelpers.resolveProtection(
+    adaptationSet,
+    representations,
+  );
 
   if (type === MediaType.VIDEO) {
     return {
       id,
       type,
       codec,
+      protection,
       tracks: [],
     };
   }
@@ -252,6 +258,7 @@ function parseAdaptationSet(
       type,
       codec,
       language,
+      protection,
       tracks: [],
     };
   }
@@ -281,29 +288,63 @@ function buildTrack(
   );
 
   if (type === MediaType.VIDEO) {
-    const width = Functional.findMap([representation, adaptationSet], (node) =>
-      XmlUtils.attr(node, "width", XmlUtils.parseNumber),
+    const nodes = [representation, adaptationSet];
+
+    const width = Functional.findMap(nodes, (n) =>
+      XmlUtils.attr(n, "width", XmlUtils.parseNumber),
     );
     asserts.assertExists(width, "width is mandatory");
-    const height = Functional.findMap([representation, adaptationSet], (node) =>
-      XmlUtils.attr(node, "height", XmlUtils.parseNumber),
+
+    const height = Functional.findMap(nodes, (n) =>
+      XmlUtils.attr(n, "height", XmlUtils.parseNumber),
     );
     asserts.assertExists(height, "height is mandatory");
+
+    const frameRate = Functional.findMap(nodes, (n) =>
+      XmlUtils.attr(n, "frameRate", parseFrameRate),
+    );
+    asserts.assertExists(frameRate, "frameRate is mandatory");
+
     return {
       id,
       type,
       width,
       height,
+      frameRate,
       bandwidth,
       segments: [],
       maxSegmentDuration: 0,
     };
   }
   if (type === MediaType.AUDIO) {
-    return { id, type, bandwidth, segments: [], maxSegmentDuration: 0 };
+    const nodes = [representation, adaptationSet];
+
+    const sampleRate = Functional.findMap(nodes, (n) =>
+      XmlUtils.attr(n, "audioSamplingRate", XmlUtils.parseNumber),
+    );
+    asserts.assertExists(sampleRate, "sampleRate is mandatory");
+
+    const channels = Functional.findMap(nodes, DashHelpers.resolveChannelCount);
+    asserts.assertExists(channels, "channels is mandatory");
+
+    return {
+      id,
+      type,
+      bandwidth,
+      segments: [],
+      maxSegmentDuration: 0,
+      channels,
+      sampleRate,
+    };
   }
   if (type === MediaType.SUBTITLE) {
-    return { id, type, bandwidth, segments: [], maxSegmentDuration: 0 };
+    return {
+      id,
+      type,
+      bandwidth,
+      segments: [],
+      maxSegmentDuration: 0,
+    };
   }
   throw new Error("Unsupported media type");
 }
@@ -393,10 +434,11 @@ function appendSegments(
   const timeline = XmlUtils.child(segmentTemplate, "SegmentTimeline");
   if (timeline) {
     const entries = XmlUtils.children(timeline, "S");
-    const firstT = entries[0]
-      ? XmlUtils.attr(entries[0], "t", XmlUtils.parseNumber, 0)
+    const firstEntry = entries[0];
+    const firstT = firstEntry
+      ? XmlUtils.attr(firstEntry, "t", XmlUtils.parseNumber, 0)
       : 0;
-    const firstAvailableStart = entries[0]
+    const firstAvailableStart = firstEntry
       ? (firstT - presentationTimeOffset) / timescale + periodStart
       : periodStart;
 
@@ -483,4 +525,23 @@ function appendSegments(
   }
 
   return { maxSegmentDuration, firstAvailableStart };
+}
+
+export function parseFrameRate(value: string): number | undefined {
+  const trimmed = value.trim();
+  const isx = trimmed.indexOf("/");
+  if (isx === -1) {
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  const numerator = Number(trimmed.substring(0, isx));
+  const denominator = Number(trimmed.substring(isx + 1));
+  if (
+    !Number.isFinite(numerator) ||
+    !Number.isFinite(denominator) ||
+    denominator === 0
+  ) {
+    return undefined;
+  }
+  return numerator / denominator;
 }
