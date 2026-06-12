@@ -91,21 +91,29 @@ Deviations from project conventions in `eme_controller.ts`:
 
 ```
 lib/drm/
-  eme_controller.ts      — thin orchestrator (~120 lines)
-  session_manager.ts     — MediaKeys + session lifecycle
-  license_client.ts      — license message → network exchange → response bytes
-  key_status_tracker.ts  — cross-session status batching + fatal/restriction policy
-  drm_utils.ts           — existing utils + PSSH synthesis from mspr:pro
+  eme_controller.ts   — orchestrator: gates, license fetch, status batching (~200 lines)
+  session_manager.ts  — MediaKeys + session lifecycle
+  drm_utils.ts        — existing utils + pure functions: mspr:pro PSSH synthesis,
+                        license request building, key status classification
 ```
+
+Only `session_manager.ts` is a new class file — session lifecycle is real
+state with real invariants and is the part needing EME fakes to test.
+Stateless logic (license exchange, status classification) follows the
+project's pure-function-utils pattern instead of getting classes; the
+controller owns the tracked license request and the batching timer, exactly
+like `ManifestController.request_` / `GapController.timer_`.
 
 ### eme_controller.ts
 
-Only what other controllers have: event subscriptions
+Follows the established controller shape: event subscriptions
 (`MANIFEST_LOADING`, `STREAMS_CREATED`, `MEDIA_ATTACHED`, `MEDIA_DETACHING`,
 plus `MANIFEST_UPDATED` for rotation), the readiness gate
-(manifest + media + key system selected → activate), and a synchronous
-`destroy()` that disposes its children. No session logic, no license logic,
-no inline utils, no cached manifest.
+(manifest + media + key system selected → activate), the tracked license
+request flow (build via `drm_utils`, POST via `NetworkService`, tracked like
+`ManifestController.request_`), the 0.5 s key-status batching `timer_`, and
+a synchronous `destroy()` that cancels in-flight work and disposes the
+session manager. No session state, no inline utils, no cached manifest.
 
 The FairPlay-vs-manifest branching collapses into one activation rule:
 *attach MediaKeys eagerly and create manifest sessions when PSSH exists;
@@ -129,27 +137,30 @@ Owns the `MediaKeys` instance and all `MediaKeySession`s:
   init data (gap 9); other reasons → drop from the active set.
 - Narrow callbacks out: `onmessage`, `onkeystatuses`.
 
-### license_client.ts
+### License exchange (drm_utils.ts + controller)
 
-The one place a key-session message becomes a network request:
+License exchange is stateless, so it is pure functions in `drm_utils.ts` /
+`playready_utils.ts`, orchestrated by the controller:
 
 - License URL resolution: app config first, then manifest `dashif:Laurl`.
 - PlayReady envelope unwrap (content-sniffed, as today) plus copying
   `SOAPAction`/`Content-Type` headers from the envelope; defaults
   `Content-Type: text/xml; charset=utf-8` when already unwrapped.
-- POST via `NetworkService`; returns response bytes or a typed error.
-- Stateless: no session references.
+- The controller POSTs via `NetworkService` (tracked request) and feeds the
+  response to `session.update()` through the session manager.
 
-### key_status_tracker.ts
+### Key status policy (drm_utils.ts + controller)
 
-Accumulates `keyStatuses` from every session into one map, debounces 0.5 s,
-then classifies:
+The session manager reports raw `keyStatuses` per session; the controller
+accumulates them into one map and debounces 0.5 s with a `Timer`. After the
+batch settles, a pure classification function in `drm_utils.ts`
+(`statuses → { allExpired, restrictedKeyIds }`) decides:
 
 - Every reported status `expired` → fatal `ALL_KEYS_EXPIRED`.
 - Key IDs with `internal-error` / `output-restricted` → restricted set.
 - Everything else → usable.
 
-Emits one consolidated verdict per batch (gap 3).
+One consolidated verdict per batch (gap 3).
 
 ### Key-system selection (stream_utils.ts)
 
@@ -231,17 +242,20 @@ interesting cases testable: close-timeout hangs, `hardware-context-reset`
 recreation, cross-session status batching, rotation dedup.
 
 Tests mirror the module layout per project convention:
-`test/drm/session_manager.test.ts`, `license_client.test.ts`,
-`key_status_tracker.test.ts`, `eme_controller.test.ts`, plus selection tests
-in the existing `stream_utils` suite.
+`test/drm/session_manager.test.ts`, `eme_controller.test.ts`, the existing
+`drm_utils.test.ts` growing cases for license building / status
+classification / mspr:pro synthesis (pure functions — no fakes needed), plus
+selection tests in the existing `stream_utils` suite.
 
 ## Execution stages
 
 Each stage independently shippable, tests included:
 
-1. **Restructure** — behavior-preserving split into the four modules, utils
-   moved out, conventions fixed (no untracked fire-and-forget async,
-   synchronous destroy, Log usage). EME fakes land here.
+1. **Restructure** — behavior-preserving split: session lifecycle extracted
+   into `session_manager.ts`, stateless logic into `drm_utils.ts` pure
+   functions, inline utils moved to `lib/utils/`, conventions fixed (no
+   untracked fire-and-forget async, synchronous destroy, Log usage). EME
+   fakes land here.
 2. **Error surface** — `Events.ERROR` + `PlayerError`, wired through all DRM
    failure paths. Early because later stages report through it.
 3. **Selection rework** — presentation-level key system selection, joint
