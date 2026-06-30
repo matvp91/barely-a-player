@@ -38,6 +38,7 @@ export class StreamController {
   private rangeStart_ = 0;
   private rangeEnd_ = 0;
   private streams_ = new Map<MediaType, Stream[]>();
+  private keySystemAccess_: MediaKeySystemAccess | null = null;
   private activeStream_ = new Map<MediaType, Stream>();
   private media_: HTMLMediaElement | null = null;
   private mediaStates_ = new Map<MediaType, MediaState>();
@@ -53,6 +54,10 @@ export class StreamController {
   getStreams<T extends MediaType>(type: T) {
     const list = this.streams_.get(type);
     return list as Stream<T>[] | null;
+  }
+
+  getKeySystemAccess() {
+    return this.keySystemAccess_;
   }
 
   getActiveStream<T extends MediaType>(type: T) {
@@ -87,10 +92,16 @@ export class StreamController {
     this.rangeEnd_ = event.manifest.end;
 
     if (!event.isUpdate) {
-      // The initial manifest can be processed.
+      const config = this.player_.getConfig();
+      const selection = await StreamUtils.selectKeySystem(
+        event.manifest,
+        config.drm,
+      );
+      this.keySystemAccess_ = selection?.access ?? null;
       this.streams_ = await StreamUtils.buildStreams(
         event.manifest,
-        this.player_.getConfig(),
+        config,
+        selection,
       );
       log.info("Streams", this.streams_);
       this.player_.emit(Events.STREAMS_CREATED);

@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PROP_DECODING_INFO } from "../../lib/constants";
 import { Events } from "../../lib/events";
 import { Player } from "../../lib/player";
 import { KeySystem } from "../../lib/types/drm";
 import { ErrorCode } from "../../lib/types/error";
-import { MediaType } from "../../lib/types/media";
 import {
   createFakeKeySystemAccess,
   FakeMediaElement,
@@ -35,13 +33,7 @@ const protectedPlayer = (
     ],
   });
   vi.spyOn(player, "getManifest").mockReturnValue(manifest);
-  // Streams carry the chosen access via decoding info (Stage 1 baseline).
-  vi.spyOn(player, "getStreams").mockImplementation((type) => {
-    if (type === MediaType.VIDEO) {
-      return [{ [PROP_DECODING_INFO]: { keySystemAccess: access } }] as never;
-    }
-    return [] as never;
-  });
+  vi.spyOn(player, "getKeySystemAccess").mockReturnValue(access);
   return { player, access, mediaKeys, manifest, pssh };
 };
 
@@ -52,7 +44,8 @@ afterEach(() => {
 describe("EmeController", () => {
   it("does nothing for clear content (no key system access)", async () => {
     const player = new Player();
-    vi.spyOn(player, "getStreams").mockReturnValue([] as never);
+    vi.spyOn(player, "getKeySystemAccess").mockReturnValue(null);
+    vi.spyOn(player, "getManifest").mockReturnValue(createManifest());
     const media = new FakeMediaElement();
     player.emit(Events.STREAMS_CREATED);
     player.emit(Events.MEDIA_ATTACHED, {
@@ -179,5 +172,30 @@ describe("EmeController", () => {
     expect(changed.mock.calls[0]![0].sessionId).toBe(
       mediaKeys.sessions[0]!.sessionId,
     );
+  });
+
+  it("emits NO_SUPPORTED_KEY_SYSTEM for protected content with no usable key system", async () => {
+    const player = new Player();
+    vi.spyOn(player, "getKeySystemAccess").mockReturnValue(null);
+    vi.spyOn(player, "getManifest").mockReturnValue(
+      createManifest({
+        switchingSets: [
+          createVideoSwitchingSet({ protection: createProtection() }),
+        ],
+      }),
+    );
+    const onError = vi.fn();
+    player.on(Events.ERROR, onError);
+    const media = new FakeMediaElement();
+    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.MEDIA_ATTACHED, {
+      media: media as unknown as HTMLMediaElement,
+      mediaSource: {} as MediaSource,
+    });
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError.mock.calls[0]![0]).toMatchObject({
+      code: ErrorCode.NO_SUPPORTED_KEY_SYSTEM,
+      fatal: true,
+    });
   });
 });

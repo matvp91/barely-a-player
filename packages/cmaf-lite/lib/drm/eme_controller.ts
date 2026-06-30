@@ -1,4 +1,3 @@
-import { PROP_DECODING_INFO } from "../constants";
 import type { MediaAttachedEvent } from "../events";
 import { Events } from "../events";
 import type { NetworkRequest } from "../net/network_request";
@@ -11,6 +10,7 @@ import { ABORTED, NetworkRequestType } from "../types/net";
 import * as BufferUtils from "../utils/buffer_utils";
 import { Log } from "../utils/log";
 import { unwrapPlayReadyChallenge } from "../utils/playready_utils";
+import { hasProtectedContent } from "./drm_utils";
 import { SessionManager } from "./session_manager";
 
 const log = Log.create("EmeController");
@@ -27,6 +27,7 @@ export class EmeController {
   private sessionManager_: SessionManager | null = null;
   private licenseRequests_ = new Set<NetworkRequest>();
   private onEncrypted_: ((event: Event) => void) | null = null;
+  private noKeySystemReported_ = false;
 
   constructor(private player_: Player) {
     this.player_.on(Events.STREAMS_CREATED, this.onStreamsCreated_);
@@ -58,23 +59,21 @@ export class EmeController {
     if (!this.media_ || this.sessionManager_) {
       return;
     }
-    const access = this.findKeySystemAccess_();
+    const access = this.player_.getKeySystemAccess();
     if (!access) {
+      if (
+        !this.noKeySystemReported_ &&
+        hasProtectedContent(this.player_.getManifest())
+      ) {
+        this.noKeySystemReported_ = true;
+        this.emitError_(
+          ErrorCode.NO_SUPPORTED_KEY_SYSTEM,
+          new Error("No supported key system for protected content"),
+        );
+      }
       return;
     }
     await this.activate_(access);
-  }
-
-  private findKeySystemAccess_(): MediaKeySystemAccess | null {
-    for (const type of [MediaType.VIDEO, MediaType.AUDIO] as const) {
-      for (const stream of this.player_.getStreams(type)) {
-        const access = stream[PROP_DECODING_INFO].keySystemAccess;
-        if (access) {
-          return access;
-        }
-      }
-    }
-    return null;
   }
 
   private async activate_(access: MediaKeySystemAccess) {
@@ -242,6 +241,7 @@ export class EmeController {
     this.sessionManager_ = null;
     this.media_ = null;
     this.onEncrypted_ = null;
+    this.noKeySystemReported_ = false;
 
     for (const request of this.licenseRequests_) {
       networkService.cancel(request);

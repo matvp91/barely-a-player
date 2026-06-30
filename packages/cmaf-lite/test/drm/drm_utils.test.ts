@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  hasProtectedContent,
   keySystemFromSchemeIdUri,
   keySystemInfoFromRaw,
 } from "../../lib/drm/drm_utils";
 import { KeySystem } from "../../lib/types/drm";
+import {
+  createManifest,
+  createProtection,
+  createVideoSwitchingSet,
+} from "../__framework__/factories";
 
 describe("keySystemFromSchemeIdUri", () => {
   it("maps known Widevine UUID", () => {
@@ -75,5 +81,20 @@ describe("keySystemInfoFromRaw", () => {
     expect(
       keySystemInfoFromRaw(KeySystem.WIDEVINE, undefined, undefined),
     ).toEqual({});
+  });
+});
+
+describe("hasProtectedContent", () => {
+  it("is true when an A/V switching set carries protection", () => {
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({ protection: createProtection() }),
+      ],
+    });
+    expect(hasProtectedContent(manifest)).toBe(true);
+  });
+
+  it("is false for clear content", () => {
+    expect(hasProtectedContent(createManifest())).toBe(false);
   });
 });

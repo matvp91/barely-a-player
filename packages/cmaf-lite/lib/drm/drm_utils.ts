@@ -1,5 +1,6 @@
 import { KeySystem } from "../types/drm";
-import type { KeySystemInfo } from "../types/manifest";
+import type { KeySystemInfo, Manifest } from "../types/manifest";
+import { MediaType } from "../types/media";
 import * as StringUtils from "../utils/string_utils";
 
 const KEY_SYSTEM_BY_UUID: Record<string, KeySystem> = {
@@ -7,6 +8,15 @@ const KEY_SYSTEM_BY_UUID: Record<string, KeySystem> = {
   "9a04f079-9840-4286-ab92-e65be0885f95": KeySystem.PLAYREADY,
   "94ce86fb-07ff-4f43-adb8-93d2fa968ca2": KeySystem.FAIRPLAY,
 };
+
+/** True when any audio/video switching set carries protection. */
+export function hasProtectedContent(manifest: Manifest): boolean {
+  return manifest.switchingSets.some(
+    (ss) =>
+      (ss.type === MediaType.VIDEO || ss.type === MediaType.AUDIO) &&
+      ss.protection != null,
+  );
+}
 
 /**
  * Maps a `urn:uuid:<uuid>` schemeIdUri to a canonical {@link KeySystem},
