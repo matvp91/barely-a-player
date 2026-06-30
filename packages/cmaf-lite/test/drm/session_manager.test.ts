@@ -116,6 +116,22 @@ describe("SessionManager", () => {
     expect(media.setMediaKeysCalls.at(-1)).toBeNull();
   });
 
+  it("keeps the originally attached element when attach is called again with a different element", async () => {
+    const { manager } = setup();
+    const first = new FakeMediaElement();
+    const second = new FakeMediaElement();
+    await manager.init();
+    await manager.attach(first as unknown as HTMLMediaElement);
+    await manager.attach(second as unknown as HTMLMediaElement);
+    // Only the first element was ever given MediaKeys.
+    expect(first.setMediaKeysCalls).toHaveLength(1);
+    expect(second.setMediaKeysCalls).toHaveLength(0);
+    await manager.destroy();
+    // Detach (setMediaKeys(null)) happened on the first element, not the second.
+    expect(first.setMediaKeysCalls.at(-1)).toBeNull();
+    expect(second.setMediaKeysCalls).toHaveLength(0);
+  });
+
   it("ignores createSession after destroy", async () => {
     const { keys, manager } = setup();
     await manager.init();

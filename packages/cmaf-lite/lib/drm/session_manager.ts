@@ -57,8 +57,8 @@ export class SessionManager {
     if (!this.mediaKeys_ || this.destroyed_) {
       return;
     }
-    this.media_ = media;
     if (!this.attachPromise_) {
+      this.media_ = media;
       this.attachPromise_ = media.setMediaKeys(this.mediaKeys_);
     }
     await this.attachPromise_;
@@ -107,6 +107,9 @@ export class SessionManager {
    * front so the instance is inert immediately.
    */
   async destroy(): Promise<void> {
+    if (this.destroyed_) {
+      return;
+    }
     this.destroyed_ = true;
     const sessions = this.sessions_.map((e) => e.session);
     const media = this.media_;
