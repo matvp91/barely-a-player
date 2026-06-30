@@ -13,10 +13,14 @@ import {
   playReadyRequestHeaders,
   unwrapPlayReadyChallenge,
 } from "../utils/playready_utils";
-import { hasProtectedContent } from "./drm_utils";
+import { isStreamRestricted } from "../utils/stream_utils";
+import { Timer } from "../utils/timer";
+import { classifyKeyStatuses, hasProtectedContent } from "./drm_utils";
 import { SessionManager } from "./session_manager";
 
 const log = Log.create("EmeController");
+
+const KEY_STATUS_BATCH_SECONDS = 0.5;
 
 /**
  * Orchestrates EME for protected presentations: gates activation on
@@ -31,6 +35,8 @@ export class EmeController {
   private licenseRequests_ = new Set<NetworkRequest>();
   private onEncrypted_: ((event: Event) => void) | null = null;
   private noKeySystemReported_ = false;
+  private keyStatuses_ = new Map<string, MediaKeyStatus>();
+  private statusTimer_ = new Timer(() => this.flushKeyStatuses_());
 
   constructor(private player_: Player) {
     this.player_.on(Events.STREAMS_CREATED, this.onStreamsCreated_);
@@ -250,21 +256,50 @@ export class EmeController {
         keyId instanceof ArrayBuffer
           ? new Uint8Array(keyId)
           : new Uint8Array(keyId.buffer, keyId.byteOffset, keyId.byteLength);
-      statuses.set(BufferUtils.toHex(bytes), status);
+      const hex = BufferUtils.toHex(bytes);
+      statuses.set(hex, status);
+      this.keyStatuses_.set(hex, status);
     });
     this.player_.emit(Events.KEY_STATUSES_CHANGED, {
       sessionId: session.sessionId,
       statuses,
     });
-    for (const status of statuses.values()) {
-      if (status === "internal-error" || status === "output-restricted") {
-        this.emitError_(
-          ErrorCode.LICENSE_RESPONSE_REJECTED,
-          new Error(`Fatal key status: ${status}`),
-        );
-        return;
+    // Batch across sessions: the browser dispatches per-session events for
+    // a logically single change; judging immediately yields spurious
+    // verdicts. Settle, then judge once.
+    this.statusTimer_.tickAfter(KEY_STATUS_BATCH_SECONDS);
+  }
+
+  private flushKeyStatuses_() {
+    const verdict = classifyKeyStatuses(this.keyStatuses_);
+    if (verdict.allExpired) {
+      this.emitError_(
+        ErrorCode.ALL_KEYS_EXPIRED,
+        new Error("All keys expired"),
+      );
+      return;
+    }
+    this.player_.setRestrictedKeyIds(verdict.restrictedKeyIds);
+    this.player_.emit(Events.RESTRICTIONS_UPDATED);
+    if (this.noPlayableStream_(verdict.restrictedKeyIds)) {
+      this.emitError_(
+        ErrorCode.KEY_STATUS_RESTRICTED,
+        new Error("No playable stream after key-status restrictions"),
+      );
+    }
+  }
+
+  private noPlayableStream_(restrictedKeyIds: Set<string>): boolean {
+    for (const type of [MediaType.VIDEO, MediaType.AUDIO] as const) {
+      const streams = this.player_.getStreams(type);
+      if (
+        streams.length > 0 &&
+        streams.every((s) => isStreamRestricted(s, restrictedKeyIds))
+      ) {
+        return true;
       }
     }
+    return false;
   }
 
   private emitError_(code: ErrorCode, cause: unknown, fatal = true) {
@@ -283,6 +318,8 @@ export class EmeController {
     this.media_ = null;
     this.onEncrypted_ = null;
     this.noKeySystemReported_ = false;
+    this.statusTimer_.stop();
+    this.keyStatuses_.clear();
 
     for (const request of this.licenseRequests_) {
       networkService.cancel(request);

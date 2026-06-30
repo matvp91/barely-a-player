@@ -175,6 +175,60 @@ describe("EmeController", () => {
     );
   });
 
+  it("emits a fatal ALL_KEYS_EXPIRED after the batch settles when all keys expired", async () => {
+    vi.useFakeTimers();
+    try {
+      const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
+      const onError = vi.fn();
+      player.on(Events.ERROR, onError);
+      const media = new FakeMediaElement();
+      player.emit(Events.STREAMS_CREATED);
+      player.emit(Events.MEDIA_ATTACHED, {
+        media: media as unknown as HTMLMediaElement,
+        mediaSource: {} as MediaSource,
+      });
+      await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
+      mediaKeys.sessions[0]!.setKeyStatus("aa", "expired");
+      mediaKeys.sessions[0]!.emitKeyStatusesChange();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(onError).toHaveBeenCalledOnce();
+      expect(onError.mock.calls[0]![0]).toMatchObject({
+        code: ErrorCode.ALL_KEYS_EXPIRED,
+        fatal: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records restricted key ids and emits RESTRICTIONS_UPDATED without going fatal when a playable stream remains", async () => {
+    vi.useFakeTimers();
+    try {
+      const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
+      // A non-restricted clear stream remains playable.
+      vi.spyOn(player, "getStreams").mockReturnValue([] as never);
+      const onError = vi.fn();
+      const onRestrictions = vi.fn();
+      player.on(Events.ERROR, onError);
+      player.on(Events.RESTRICTIONS_UPDATED, onRestrictions);
+      const media = new FakeMediaElement();
+      player.emit(Events.STREAMS_CREATED);
+      player.emit(Events.MEDIA_ATTACHED, {
+        media: media as unknown as HTMLMediaElement,
+        mediaSource: {} as MediaSource,
+      });
+      await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
+      mediaKeys.sessions[0]!.setKeyStatus("dd", "output-restricted");
+      mediaKeys.sessions[0]!.emitKeyStatusesChange();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(player.getRestrictedKeyIds().has("dd")).toBe(true);
+      expect(onRestrictions).toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("falls back to the encrypted event when manifest has no PSSH for the key system", async () => {
     const mediaKeys = new FakeMediaKeys();
     const player = new Player();
