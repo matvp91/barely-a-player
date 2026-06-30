@@ -178,11 +178,26 @@ function upsertSwitchingSet(
 ): SwitchingSet {
   const { switchingSets } = ctx.manifest;
   const id = getAdaptationSetId(adaptationSet, representations);
-  return ctx.switchingSetsById.getOrInsertComputed(id, () => {
-    const switchingSet = parseAdaptationSet(id, adaptationSet, representations);
-    switchingSets.push(switchingSet);
-    return switchingSet;
+  const switchingSet = ctx.switchingSetsById.getOrInsertComputed(id, () => {
+    const created = parseAdaptationSet(id, adaptationSet, representations);
+    switchingSets.push(created);
+    return created;
   });
+  // On a live update, re-parse ContentProtection so rotated PSSH (a new
+  // <cenc:pssh>/<mspr:pro> in the refreshed MPD) is surfaced; the initial
+  // parse populated it once and getOrInsertComputed would otherwise keep
+  // the stale value forever.
+  if (
+    ctx.isUpdate &&
+    (switchingSet.type === MediaType.VIDEO ||
+      switchingSet.type === MediaType.AUDIO)
+  ) {
+    switchingSet.protection = DashHelpers.resolveProtection(
+      adaptationSet,
+      representations,
+    );
+  }
+  return switchingSet;
 }
 
 function upsertTrack(

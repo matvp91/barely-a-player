@@ -735,6 +735,27 @@ describe("DashParser", () => {
     });
   });
 
+  describe("ContentProtection — update", () => {
+    it("refreshes ContentProtection PSSH on a live update (key rotation)", () => {
+      const text = loadFixture(
+        "dash-parser/vod-protected-widevine-playready.mpd",
+      );
+      const manifest = DashParser.create(text, sourceUrl);
+      const before =
+        findVideo(manifest).protection!.keySystems[KeySystem.WIDEVINE]!.pssh!;
+      const originalB64 =
+        "AAAAQnBzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAACIIARIQq83vASNFZ4mrze8BI0VniRoIc2hha2FfY2FzdGNl";
+      const rotatedB64 = "AQIDBAUGBwg=";
+      const updatedText = text.replace(originalB64, rotatedB64);
+      // Sanity: the replace actually changed the text.
+      expect(updatedText).not.toBe(text);
+      DashParser.update(manifest, updatedText, sourceUrl);
+      const after =
+        findVideo(manifest).protection!.keySystems[KeySystem.WIDEVINE]!.pssh!;
+      expect(Array.from(after)).not.toEqual(Array.from(before));
+    });
+  });
+
   describe("update — live reconciliation", () => {
     it("appends new tail segments and prunes expired head segments", () => {
       const manifest = DashParser.create(

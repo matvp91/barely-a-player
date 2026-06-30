@@ -117,9 +117,14 @@ export class EmeController {
           await manager.attach(this.media_);
         }
         await this.createManifestSessions_(manager);
+        // Suppress the `encrypted` listener when the manifest already declares
+        // PSSH for this key system (validated against Shaka). Consequence:
+        // content that ships manifest PSSH and later rotates keys ONLY via
+        // in-band PSSH is not re-keyed — in-band PSSH parsing is out of scope;
+        // rotation is supported via refreshed manifest PSSH (see
+        // DashParser.update) or via the encrypted path for
+        // default_KID-only content.
         if (!this.manifestHasPssh_(manager.keySystem)) {
-          // No manifest PSSH for this key system (e.g. only default_KID
-          // with in-band PSSH) — let the encrypted event drive sessions.
           this.attachEncryptedListener_(manager);
         }
       }
@@ -290,16 +295,21 @@ export class EmeController {
   }
 
   private noPlayableStream_(restrictedKeyIds: Set<string>): boolean {
+    let anyType = false;
     for (const type of [MediaType.VIDEO, MediaType.AUDIO] as const) {
       const streams = this.player_.getStreams(type);
-      if (
-        streams.length > 0 &&
-        streams.every((s) => isStreamRestricted(s, restrictedKeyIds))
-      ) {
-        return true;
+      if (streams.length === 0) {
+        continue;
+      }
+      anyType = true;
+      const allRestricted = streams.every((s) =>
+        isStreamRestricted(s, restrictedKeyIds),
+      );
+      if (!allRestricted) {
+        return false;
       }
     }
-    return false;
+    return anyType;
   }
 
   private emitError_(code: ErrorCode, cause: unknown, fatal = true) {

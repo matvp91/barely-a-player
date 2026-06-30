@@ -48,6 +48,9 @@ export class SessionManager {
 
   /** Creates MediaKeys and installs the server certificate if given. */
   async init(serverCertificate?: Uint8Array): Promise<void> {
+    if (this.mediaKeys_ || this.destroyed_) {
+      return;
+    }
     this.mediaKeys_ = await this.access_.createMediaKeys();
     if (serverCertificate) {
       await this.mediaKeys_.setServerCertificate(

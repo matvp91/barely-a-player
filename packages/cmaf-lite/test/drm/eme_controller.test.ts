@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PROP_HIERARCHY } from "../../lib/constants";
 import { Events } from "../../lib/events";
 import { Player } from "../../lib/player";
 import { KeySystem } from "../../lib/types/drm";
 import { ErrorCode } from "../../lib/types/error";
+import type { Stream } from "../../lib/types/media";
+import { MediaType } from "../../lib/types/media";
 import {
   createFakeKeySystemAccess,
   FakeMediaElement,
@@ -304,6 +307,194 @@ describe("EmeController", () => {
       code: ErrorCode.NO_SUPPORTED_KEY_SYSTEM,
       fatal: true,
     });
+  });
+
+  it("does not go fatal when only audio is fully restricted but video remains playable", async () => {
+    vi.useFakeTimers();
+    try {
+      const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
+      // Restricted audio key id: "dd". Video stream uses a different key.
+      const audioStream: Stream<MediaType.AUDIO> = {
+        type: MediaType.AUDIO,
+        codec: "mp4a.40.2",
+        bandwidth: 128_000,
+        language: "unk",
+        [PROP_HIERARCHY]: {
+          switchingSet: createAudioSwitchingSet({
+            protection: createProtection({ defaultKid: "dd" }),
+          }),
+          track: {
+            id: "a1",
+            type: MediaType.AUDIO,
+            bandwidth: 128_000,
+            segments: [],
+            maxSegmentDuration: 4,
+          },
+        },
+        [Symbol("decodingInfo")]: {} as MediaCapabilitiesDecodingInfo,
+      } as unknown as Stream<MediaType.AUDIO>;
+      const videoStream: Stream<MediaType.VIDEO> = {
+        type: MediaType.VIDEO,
+        codec: "avc1.64001f",
+        bandwidth: 2_000_000,
+        width: 1920,
+        height: 1080,
+        [PROP_HIERARCHY]: {
+          switchingSet: createVideoSwitchingSet({
+            protection: createProtection({ defaultKid: "ee" }),
+          }),
+          track: {
+            id: "v1",
+            type: MediaType.VIDEO,
+            bandwidth: 2_000_000,
+            width: 1920,
+            height: 1080,
+            segments: [],
+            maxSegmentDuration: 4,
+          },
+        },
+        [Symbol("decodingInfo")]: {} as MediaCapabilitiesDecodingInfo,
+      } as unknown as Stream<MediaType.VIDEO>;
+      vi.spyOn(player, "getStreams").mockImplementation((type) => {
+        if (type === MediaType.AUDIO) {
+          return [audioStream] as never;
+        }
+        if (type === MediaType.VIDEO) {
+          return [videoStream] as never;
+        }
+        return [] as never;
+      });
+      const onError = vi.fn();
+      const onRestrictions = vi.fn();
+      player.on(Events.ERROR, onError);
+      player.on(Events.RESTRICTIONS_UPDATED, onRestrictions);
+      const media = new FakeMediaElement();
+      player.emit(Events.STREAMS_CREATED);
+      player.emit(Events.MEDIA_ATTACHED, {
+        media: media as unknown as HTMLMediaElement,
+        mediaSource: {} as MediaSource,
+      });
+      await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
+      // Restrict the audio key only.
+      mediaKeys.sessions[0]!.setKeyStatus("dd", "output-restricted");
+      mediaKeys.sessions[0]!.emitKeyStatusesChange();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(onRestrictions).toHaveBeenCalled();
+      expect(player.getRestrictedKeyIds().has("dd")).toBe(true);
+      // Video is still playable — must NOT be fatal.
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("goes fatal when both audio and video are fully restricted", async () => {
+    vi.useFakeTimers();
+    try {
+      const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
+      const audioStream: Stream<MediaType.AUDIO> = {
+        type: MediaType.AUDIO,
+        codec: "mp4a.40.2",
+        bandwidth: 128_000,
+        language: "unk",
+        [PROP_HIERARCHY]: {
+          switchingSet: createAudioSwitchingSet({
+            protection: createProtection({ defaultKid: "dd" }),
+          }),
+          track: {
+            id: "a1",
+            type: MediaType.AUDIO,
+            bandwidth: 128_000,
+            segments: [],
+            maxSegmentDuration: 4,
+          },
+        },
+        [Symbol("decodingInfo")]: {} as MediaCapabilitiesDecodingInfo,
+      } as unknown as Stream<MediaType.AUDIO>;
+      const videoStream: Stream<MediaType.VIDEO> = {
+        type: MediaType.VIDEO,
+        codec: "avc1.64001f",
+        bandwidth: 2_000_000,
+        width: 1920,
+        height: 1080,
+        [PROP_HIERARCHY]: {
+          switchingSet: createVideoSwitchingSet({
+            protection: createProtection({ defaultKid: "ee" }),
+          }),
+          track: {
+            id: "v1",
+            type: MediaType.VIDEO,
+            bandwidth: 2_000_000,
+            width: 1920,
+            height: 1080,
+            segments: [],
+            maxSegmentDuration: 4,
+          },
+        },
+        [Symbol("decodingInfo")]: {} as MediaCapabilitiesDecodingInfo,
+      } as unknown as Stream<MediaType.VIDEO>;
+      vi.spyOn(player, "getStreams").mockImplementation((type) => {
+        if (type === MediaType.AUDIO) {
+          return [audioStream] as never;
+        }
+        if (type === MediaType.VIDEO) {
+          return [videoStream] as never;
+        }
+        return [] as never;
+      });
+      const onError = vi.fn();
+      player.on(Events.ERROR, onError);
+      const media = new FakeMediaElement();
+      player.emit(Events.STREAMS_CREATED);
+      player.emit(Events.MEDIA_ATTACHED, {
+        media: media as unknown as HTMLMediaElement,
+        mediaSource: {} as MediaSource,
+      });
+      await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
+      // Restrict both keys: audio "dd" and video "ee".
+      mediaKeys.sessions[0]!.setKeyStatus("dd", "output-restricted");
+      mediaKeys.sessions[0]!.setKeyStatus("ee", "output-restricted");
+      mediaKeys.sessions[0]!.emitKeyStatusesChange();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(onError).toHaveBeenCalledOnce();
+      expect(onError.mock.calls[0]![0]).toMatchObject({
+        code: ErrorCode.KEY_STATUS_RESTRICTED,
+        fatal: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("POSTs with PlayReady Content-Type header wired through onSessionMessage_", async () => {
+    const { player, mediaKeys } = protectedPlayer(KeySystem.PLAYREADY);
+    player.setConfig("drm.licenseUrls", {
+      [KeySystem.PLAYREADY]: "https://lic.playready.test",
+    });
+    let capturedHeaders: Headers | undefined;
+    const net = player.getNetworkService();
+    vi.spyOn(net, "request").mockImplementation(
+      (_type, _url, _abortSignal, init) => {
+        capturedHeaders = (init as { headers?: Headers }).headers;
+        return {
+          promise: Promise.resolve({ arrayBuffer: new Uint8Array([1]).buffer }),
+        } as never;
+      },
+    );
+    const media = new FakeMediaElement();
+    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.MEDIA_ATTACHED, {
+      media: media as unknown as HTMLMediaElement,
+      mediaSource: {} as MediaSource,
+    });
+    await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
+    // Emit a plain (non-envelope) message — unwrapPlayReadyChallenge returns
+    // it unchanged; playReadyRequestHeaders defaults to text/xml; charset=utf-8.
+    mediaKeys.sessions[0]!.emitMessage(new Uint8Array([1, 2, 3]));
+    await vi.waitFor(() => expect(capturedHeaders).toBeDefined());
+    expect(capturedHeaders!.get("Content-Type")).toBe(
+      "text/xml; charset=utf-8",
+    );
   });
 
   it("treats a license failure as non-fatal when other sessions are active", async () => {
