@@ -24,7 +24,9 @@ import * as ObjectUtils from "./utils/object_utils";
  * @public
  */
 export class Player extends EventEmitter<EventMap> {
-  private config_ = DEFAULT_CONFIG;
+  // Clone so each Player owns its config; setConfig must never mutate the
+  // shared DEFAULT_CONFIG (which would leak settings across instances).
+  private config_: PlayerConfig = structuredClone(DEFAULT_CONFIG);
   private media_: HTMLMediaElement | null = null;
 
   private networkService_: NetworkService;

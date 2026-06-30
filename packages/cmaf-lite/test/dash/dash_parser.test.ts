@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as DashParser from "../../lib/dash/dash_parser";
-import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
+import { KeySystem } from "../../lib/types/drm";
 import type { AudioTrack, VideoTrack } from "../../lib/types/manifest";
 import { MediaType } from "../../lib/types/media";
 import { loadFixture } from "../fixtures";
@@ -670,9 +670,9 @@ describe("DashParser", () => {
         sourceUrl,
       );
       const video = findVideo(manifest);
-      expect(video.protection?.scheme).toBe(EncryptionScheme.CENC);
+      // The MPD's dashed cenc:default_KID is normalized to dashless hex.
       expect(video.protection?.defaultKid).toBe(
-        "abcdef01-2345-6789-abcd-ef0123456789",
+        "abcdef0123456789abcdef0123456789",
       );
       expect(
         video.protection?.keySystems[KeySystem.WIDEVINE]?.pssh,
@@ -693,19 +693,17 @@ describe("DashParser", () => {
         sourceUrl,
       );
       const video = findVideo(manifest);
-      expect(video.protection?.scheme).toBe(EncryptionScheme.CENC);
       expect(
         video.protection?.keySystems[KeySystem.WIDEVINE]?.pssh,
       ).toBeInstanceOf(Uint8Array);
     });
 
-    it("parses FairPlay contentId and cbcs scheme from the value attribute", () => {
+    it("parses FairPlay contentId from the value attribute", () => {
       const manifest = DashParser.create(
         loadFixture("dash-parser/vod-protected-fairplay.mpd"),
         sourceUrl,
       );
       const video = findVideo(manifest);
-      expect(video.protection?.scheme).toBe(EncryptionScheme.CBCS);
       expect(video.protection?.keySystems[KeySystem.FAIRPLAY]?.contentId).toBe(
         "skd://example/abc123",
       );
@@ -718,6 +716,41 @@ describe("DashParser", () => {
           sourceUrl,
         ),
       ).toThrow(/default_KID/);
+    });
+
+    it("synthesizes a PlayReady PSSH from mspr:pro when cenc:pssh is absent", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-protected-playready-mspr-pro.mpd"),
+        sourceUrl,
+      );
+      const video = findVideo(manifest);
+      expect(
+        video.protection?.keySystems[KeySystem.PLAYREADY]?.pssh,
+      ).toBeInstanceOf(Uint8Array);
+      // It's a synthesized v0 pssh box: starts after the 4-byte size with "pssh".
+      const pssh = video.protection!.keySystems[KeySystem.PLAYREADY]!.pssh!;
+      expect(Array.from(pssh.subarray(4, 8))).toEqual([0x70, 0x73, 0x73, 0x68]);
+    });
+  });
+
+  describe("ContentProtection — update", () => {
+    it("refreshes ContentProtection PSSH on a live update (key rotation)", () => {
+      const text = loadFixture(
+        "dash-parser/vod-protected-widevine-playready.mpd",
+      );
+      const manifest = DashParser.create(text, sourceUrl);
+      const before =
+        findVideo(manifest).protection!.keySystems[KeySystem.WIDEVINE]!.pssh!;
+      const originalB64 =
+        "AAAAQnBzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAACIIARIQq83vASNFZ4mrze8BI0VniRoIc2hha2FfY2FzdGNl";
+      const rotatedB64 = "AQIDBAUGBwg=";
+      const updatedText = text.replace(originalB64, rotatedB64);
+      // Sanity: the replace actually changed the text.
+      expect(updatedText).not.toBe(text);
+      DashParser.update(manifest, updatedText, sourceUrl);
+      const after =
+        findVideo(manifest).protection!.keySystems[KeySystem.WIDEVINE]!.pssh!;
+      expect(Array.from(after)).not.toEqual(Array.from(before));
     });
   });
 

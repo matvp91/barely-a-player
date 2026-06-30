@@ -178,11 +178,26 @@ function upsertSwitchingSet(
 ): SwitchingSet {
   const { switchingSets } = ctx.manifest;
   const id = getAdaptationSetId(adaptationSet, representations);
-  return ctx.switchingSetsById.getOrInsertComputed(id, () => {
-    const switchingSet = parseAdaptationSet(id, adaptationSet, representations);
-    switchingSets.push(switchingSet);
-    return switchingSet;
+  const switchingSet = ctx.switchingSetsById.getOrInsertComputed(id, () => {
+    const created = parseAdaptationSet(id, adaptationSet, representations);
+    switchingSets.push(created);
+    return created;
   });
+  // On a live update, re-parse ContentProtection so rotated PSSH (a new
+  // <cenc:pssh>/<mspr:pro> in the refreshed MPD) is surfaced; the initial
+  // parse populated it once and getOrInsertComputed would otherwise keep
+  // the stale value forever.
+  if (
+    ctx.isUpdate &&
+    (switchingSet.type === MediaType.VIDEO ||
+      switchingSet.type === MediaType.AUDIO)
+  ) {
+    switchingSet.protection = DashHelpers.resolveProtection(
+      adaptationSet,
+      representations,
+    );
+  }
+  return switchingSet;
 }
 
 function upsertTrack(
@@ -303,7 +318,6 @@ function buildTrack(
     const frameRate = Functional.findMap(nodes, (n) =>
       XmlUtils.attr(n, "frameRate", parseFrameRate),
     );
-    asserts.assertExists(frameRate, "frameRate is mandatory");
 
     return {
       id,
@@ -320,12 +334,10 @@ function buildTrack(
     const nodes = [representation, adaptationSet];
 
     const sampleRate = Functional.findMap(nodes, (n) =>
-      XmlUtils.attr(n, "audioSamplingRate", XmlUtils.parseNumber),
+      XmlUtils.attr(n, "audioSamplingRate", parseSampleRate),
     );
-    asserts.assertExists(sampleRate, "sampleRate is mandatory");
 
     const channels = Functional.findMap(nodes, DashHelpers.resolveChannelCount);
-    asserts.assertExists(channels, "channels is mandatory");
 
     return {
       id,
@@ -544,4 +556,15 @@ export function parseFrameRate(value: string): number | undefined {
     return undefined;
   }
   return numerator / denominator;
+}
+
+/**
+ * Parses an `audioSamplingRate` attribute. DASH permits a space-separated
+ * pair (min/max); we take the first value. Returns undefined when the
+ * value is empty or not a finite number.
+ */
+export function parseSampleRate(value: string): number | undefined {
+  const first = value.trim().split(/\s+/)[0];
+  const n = Number(first);
+  return first && Number.isFinite(n) ? n : undefined;
 }

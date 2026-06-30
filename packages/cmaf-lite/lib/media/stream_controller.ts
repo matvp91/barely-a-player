@@ -4,6 +4,7 @@ import type {
   BufferFlushedEvent,
   ManifestUpdatedEvent,
   MediaAttachedEvent,
+  StreamsUpdatingEvent,
 } from "../events";
 import { Events } from "../events";
 import type { NetworkRequest } from "../net/network_request";
@@ -14,10 +15,10 @@ import { MediaType } from "../types/media";
 import { ABORTED, NetworkRequestType } from "../types/net";
 import * as ArrayUtils from "../utils/array_utils";
 import * as asserts from "../utils/asserts";
-import * as BufferUtils from "../utils/buffer_utils";
 import { Log } from "../utils/log";
 import * as ManifestUtils from "../utils/manifest_utils";
 import * as StreamUtils from "../utils/stream_utils";
+import * as TimeRangesUtils from "../utils/time_ranges_utils";
 import { Timer } from "../utils/timer";
 
 const log = Log.create("StreamController");
@@ -38,6 +39,7 @@ export class StreamController {
   private rangeStart_ = 0;
   private rangeEnd_ = 0;
   private streams_ = new Map<MediaType, Stream[]>();
+  private restrictedKeyIds_ = new Set<string>();
   private activeStream_ = new Map<MediaType, Stream>();
   private media_: HTMLMediaElement | null = null;
   private mediaStates_ = new Map<MediaType, MediaState>();
@@ -48,11 +50,18 @@ export class StreamController {
     this.player_.on(Events.MEDIA_DETACHED, this.onMediaDetached_);
     this.player_.on(Events.BUFFER_FLUSHED, this.onBufferFlushed_);
     this.player_.on(Events.ABR_ADAPT, this.onAbrAdapt_);
+    this.player_.on(Events.STREAMS_UPDATING, this.onStreamsUpdating_);
   }
 
   getStreams<T extends MediaType>(type: T) {
     const list = this.streams_.get(type);
-    return list as Stream<T>[] | null;
+    if (!list) {
+      return null;
+    }
+    // The playable set: streams whose key is not restricted by key status.
+    return list.filter(
+      (s) => !StreamUtils.isStreamRestricted(s, this.restrictedKeyIds_),
+    ) as Stream<T>[];
   }
 
   getActiveStream<T extends MediaType>(type: T) {
@@ -77,6 +86,7 @@ export class StreamController {
     this.player_.off(Events.MEDIA_DETACHED, this.onMediaDetached_);
     this.player_.off(Events.BUFFER_FLUSHED, this.onBufferFlushed_);
     this.player_.off(Events.ABR_ADAPT, this.onAbrAdapt_);
+    this.player_.off(Events.STREAMS_UPDATING, this.onStreamsUpdating_);
     this.mediaStates_.clear();
   }
 
@@ -87,13 +97,10 @@ export class StreamController {
     this.rangeEnd_ = event.manifest.end;
 
     if (!event.isUpdate) {
-      // The initial manifest can be processed.
-      this.streams_ = await StreamUtils.buildStreams(
-        event.manifest,
-        this.player_.getConfig(),
-      );
+      const config = this.player_.getConfig();
+      this.streams_ = await StreamUtils.buildStreams(event.manifest, config);
       log.info("Streams", this.streams_);
-      this.player_.emit(Events.STREAMS_CREATED);
+      this.player_.emit(Events.STREAMS_UPDATED);
       this.tryStart_();
     }
   };
@@ -114,6 +121,30 @@ export class StreamController {
 
   private onAbrAdapt_ = (event: AbrAdaptEvent) => {
     this.switchStream_(event.stream);
+  };
+
+  private onStreamsUpdating_ = (event: StreamsUpdatingEvent) => {
+    // Apply the new restriction set, switch any now-unplayable active stream
+    // to the first playable one of its type, then announce the changed
+    // playable set so ABR and others re-evaluate.
+    this.restrictedKeyIds_ = event.restrictedKeyIds;
+    for (const type of this.streams_.keys()) {
+      if (type === MediaType.SUBTITLE) {
+        continue;
+      }
+      const active = this.getActiveStream(type);
+      if (
+        !active ||
+        !StreamUtils.isStreamRestricted(active, this.restrictedKeyIds_)
+      ) {
+        continue;
+      }
+      const replacement = this.getStreams(type)?.[0];
+      if (replacement) {
+        this.switchStream_(replacement);
+      }
+    }
+    this.player_.emit(Events.STREAMS_UPDATED);
   };
 
   private switchStream_(stream: Stream) {
@@ -356,7 +387,7 @@ export class StreamController {
   private getBufferEnd_(type: MediaType, time: number): number | null {
     const { maxBufferHole } = this.player_.getConfig();
     const buffered = this.player_.getBuffered(type);
-    return BufferUtils.getBufferedEnd(buffered, time, maxBufferHole);
+    return TimeRangesUtils.getBufferedEnd(buffered, time, maxBufferHole);
   }
 
   private getNextSegment_(

@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  PROP_DECODING_INFO,
-  PROP_HIERARCHY,
-  PROP_KEY_SYSTEM_ACCESS,
-} from "../../lib/constants";
+import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../../lib/constants";
 import { KeySystem } from "../../lib/types/drm";
 import type {
   AudioStream,
@@ -15,7 +11,10 @@ import {
   buildDecodingConfig,
   buildStreams,
   findStreamsMatchingPreferences,
+  getKeySystemAccess,
+  isStreamRestricted,
   pickClosestByBandwidth,
+  selectKeySystem,
 } from "../../lib/utils/stream_utils";
 import {
   createAudioSwitchingSet,
@@ -484,83 +483,58 @@ describe("buildDecodingConfig", () => {
       bandwidth: 5_000_000,
     });
     const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
-    const config = buildDecodingConfig(
-      track,
-      switchingSet,
-      KeySystem.WIDEVINE,
-    ) as MediaDecodingConfiguration & {
-      keySystemConfiguration: MediaKeySystemConfiguration & {
-        keySystem: string;
-      };
-    };
-    expect(config.keySystemConfiguration.keySystem).toBe(KeySystem.WIDEVINE);
-    expect(config.keySystemConfiguration.videoCapabilities![0]).toEqual({
-      contentType: 'video/mp4; codecs="avc1.640028"',
-      robustness: "SW_SECURE_CRYPTO",
+    const config = buildDecodingConfig(track, switchingSet, KeySystem.WIDEVINE);
+    expect(config.keySystemConfiguration?.keySystem).toBe(KeySystem.WIDEVINE);
+    expect(config.keySystemConfiguration?.initDataType).toBe("cenc");
+    expect(config.keySystemConfiguration?.video).toEqual({
+      robustness: "SW_SECURE_DECODE",
     });
-    expect(config.keySystemConfiguration.initDataTypes).toEqual(["cenc"]);
-    expect(config.keySystemConfiguration.audioCapabilities).toBeUndefined();
+    expect(config.keySystemConfiguration?.audio).toBeUndefined();
+    expect(config.video?.contentType).toBe('video/mp4; codecs="avc1.640028"');
   });
 
-  it("uses audioCapabilities for an audio key system probe", () => {
+  it("uses the skd init-data type for a FairPlay probe", () => {
+    const track = createVideoTrack({ bandwidth: 5_000_000 });
+    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
+    const config = buildDecodingConfig(track, switchingSet, KeySystem.FAIRPLAY);
+    expect(config.keySystemConfiguration?.initDataType).toBe("skd");
+  });
+
+  it("uses audio KeySystemTrackConfiguration for an audio key system probe", () => {
     const track = createAudioTrack({ bandwidth: 128_000 });
     const switchingSet = createAudioSwitchingSet({ codec: "mp4a.40.2" });
-    const config = buildDecodingConfig(
-      track,
-      switchingSet,
-      KeySystem.WIDEVINE,
-    ) as MediaDecodingConfiguration & {
-      keySystemConfiguration: MediaKeySystemConfiguration & {
-        keySystem: string;
-      };
-    };
-    expect(config.keySystemConfiguration.audioCapabilities![0]).toEqual({
-      contentType: 'audio/mp4; codecs="mp4a.40.2"',
+    const config = buildDecodingConfig(track, switchingSet, KeySystem.WIDEVINE);
+    expect(config.keySystemConfiguration?.audio).toEqual({
       robustness: "SW_SECURE_CRYPTO",
     });
-    expect(config.keySystemConfiguration.videoCapabilities).toBeUndefined();
+    expect(config.keySystemConfiguration?.video).toBeUndefined();
+    expect(config.audio?.contentType).toBe('audio/mp4; codecs="mp4a.40.2"');
   });
 });
 
-describe("buildStreams (protected)", () => {
-  it("returns the first key system that probes supported, in preferredKeySystems order", async () => {
-    const spy = mockMediaCapabilities();
-    spy.mockImplementation(async (cfg: MediaDecodingConfiguration) => {
-      const ks = (
-        cfg as MediaDecodingConfiguration & {
-          keySystemConfiguration?: MediaKeySystemConfiguration;
-        }
-      ).keySystemConfiguration;
-      const robustness = ks?.videoCapabilities?.[0]?.robustness;
-      if (robustness === "SW_SECURE_CRYPTO") {
-        return createDecodingInfo({
-          keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
-        });
-      }
-      return createDecodingInfo({ supported: false, keySystemAccess: null });
-    });
-
-    const manifest = createManifest({
+describe("selectKeySystem", () => {
+  const protectedManifest = (keySystems: Record<string, unknown>) =>
+    createManifest({
       switchingSets: [
         createVideoSwitchingSet({
-          protection: createProtection({
-            keySystems: {
-              [KeySystem.FAIRPLAY]: { contentId: "skd://x" },
-              [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
-            },
-          }),
+          protection: createProtection({ keySystems: keySystems as never }),
+        }),
+        createAudioSwitchingSet({
+          protection: createProtection({ keySystems: keySystems as never }),
         }),
       ],
     });
-    const list =
-      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
-    expect(list).toHaveLength(1);
-    const video = list[0] as VideoStream;
-    expect(video[PROP_KEY_SYSTEM_ACCESS]?.keySystem).toBe(KeySystem.WIDEVINE);
-    expect(spy).toHaveBeenCalledTimes(2);
+
+  it("returns null for clear content", async () => {
+    mockMediaCapabilities();
+    const selection = await selectKeySystem(
+      createManifest(),
+      DEFAULT_CONFIG.drm,
+    );
+    expect(selection).toBeNull();
   });
 
-  it("probes configured key systems even when manifest protection lists different ones", async () => {
+  it("picks the first preferred key system present in the manifest that probes supported", async () => {
     const spy = mockMediaCapabilities();
     spy.mockImplementation(async (cfg: MediaDecodingConfiguration) => {
       const ks = (
@@ -576,32 +550,143 @@ describe("buildStreams (protected)", () => {
       return createDecodingInfo({ supported: false, keySystemAccess: null });
     });
 
+    const selection = await selectKeySystem(
+      protectedManifest({
+        [KeySystem.FAIRPLAY]: { contentId: "skd://x" },
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
+    );
+    expect(selection).toBe(KeySystem.WIDEVINE);
+  });
+
+  it("probes a single config carrying both video and audio capabilities", async () => {
+    const spy = mockMediaCapabilities(
+      createDecodingInfo({
+        keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+      }),
+    );
+    await selectKeySystem(
+      protectedManifest({
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
+    );
+    const cfg = spy.mock.calls[0]![0];
+    expect(cfg.keySystemConfiguration?.video).toBeDefined();
+    expect(cfg.keySystemConfiguration?.audio).toBeDefined();
+  });
+
+  it("skips key systems not present in the manifest", async () => {
+    const spy = mockMediaCapabilities(
+      createDecodingInfo({
+        keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+      }),
+    );
+    await selectKeySystem(
+      protectedManifest({
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      {
+        ...DEFAULT_CONFIG.drm,
+        preferredKeySystems: [KeySystem.PLAYREADY, KeySystem.WIDEVINE],
+      },
+    );
+    // PlayReady absent from manifest → only Widevine probed.
+    expect(spy).toHaveBeenCalledTimes(1);
+    const cfg = spy.mock.calls[0]![0] as MediaDecodingConfiguration & {
+      keySystemConfiguration: { keySystem: string };
+    };
+    expect(cfg.keySystemConfiguration.keySystem).toBe(KeySystem.WIDEVINE);
+  });
+
+  it("picks the first preferred key system when multiple are present and supported", async () => {
+    const spy = mockMediaCapabilities();
+    spy.mockImplementation(async (cfg: MediaDecodingConfiguration) => {
+      const ks = (
+        cfg as MediaDecodingConfiguration & {
+          keySystemConfiguration?: { keySystem?: string };
+        }
+      ).keySystemConfiguration?.keySystem;
+      // Both PlayReady and Widevine are supported.
+      if (ks === KeySystem.PLAYREADY || ks === KeySystem.WIDEVINE) {
+        return createDecodingInfo({
+          keySystemAccess: createKeySystemAccess(ks as KeySystem),
+        });
+      }
+      return createDecodingInfo({ supported: false, keySystemAccess: null });
+    });
+
+    const selection = await selectKeySystem(
+      protectedManifest({
+        [KeySystem.PLAYREADY]: { laUrl: "https://example.com" },
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      {
+        ...DEFAULT_CONFIG.drm,
+        preferredKeySystems: [KeySystem.PLAYREADY, KeySystem.WIDEVINE],
+      },
+    );
+    // PlayReady is first in preference order, so it wins even though both are supported.
+    expect(selection).toBe(KeySystem.PLAYREADY);
+  });
+
+  it("returns null when no preferred key system probes supported", async () => {
+    mockMediaCapabilities(
+      createDecodingInfo({ supported: false, keySystemAccess: null }),
+    );
+    const selection = await selectKeySystem(
+      protectedManifest({
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      DEFAULT_CONFIG.drm,
+    );
+    expect(selection).toBeNull();
+  });
+});
+
+describe("isStreamRestricted", () => {
+  const videoStream = async (defaultKid: string) => {
+    mockMediaCapabilities(
+      createDecodingInfo({
+        keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+      }),
+    );
     const manifest = createManifest({
       switchingSets: [
         createVideoSwitchingSet({
-          protection: createProtection({
-            keySystems: {
-              [KeySystem.PLAYREADY]: {},
-            },
-          }),
+          protection: createProtection({ defaultKid }),
         }),
       ],
     });
-
-    const config = {
-      ...DEFAULT_CONFIG,
-      drm: { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
-    };
     const list =
-      (await buildStreams(manifest, config)).get(MediaType.VIDEO) ?? [];
-    expect(list).toHaveLength(1);
-    const video = list[0] as VideoStream;
-    expect(video[PROP_KEY_SYSTEM_ACCESS]?.keySystem).toBe(KeySystem.WIDEVINE);
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
+    return list[0]!;
+  };
+
+  it("is true when the stream's default_KID is in the restricted set", async () => {
+    const stream = await videoStream("abcdef0123456789abcdef0123456789");
+    const restricted = new Set(["abcdef0123456789abcdef0123456789"]);
+    expect(isStreamRestricted(stream, restricted)).toBe(true);
   });
 
-  it("drops streams when no preferred key system is supported", async () => {
+  it("is false when the key ID is not restricted", async () => {
+    const stream = await videoStream("abcdef0123456789abcdef0123456789");
+    expect(isStreamRestricted(stream, new Set(["00"]))).toBe(false);
+  });
+
+  it("is false for an empty restricted set", async () => {
+    const stream = await videoStream("abcdef0123456789abcdef0123456789");
+    expect(isStreamRestricted(stream, new Set())).toBe(false);
+  });
+});
+
+describe("buildStreams (protected)", () => {
+  it("keeps protected streams when a key system is selected", async () => {
     mockMediaCapabilities(
-      createDecodingInfo({ supported: false, keySystemAccess: null }),
+      createDecodingInfo({
+        keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+      }),
     );
     const manifest = createManifest({
       switchingSets: [
@@ -610,6 +695,45 @@ describe("buildStreams (protected)", () => {
     });
     const list =
       (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
+    expect(list).toHaveLength(1);
+  });
+
+  it("drops protected streams when no key system is selected", async () => {
+    mockMediaCapabilities();
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({ protection: createProtection() }),
+      ],
+    });
+    const list =
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     expect(list).toHaveLength(0);
+  });
+});
+
+describe("getKeySystemAccess", () => {
+  it("returns the access from the first protected stream's decoding info", async () => {
+    const access = createKeySystemAccess(KeySystem.WIDEVINE);
+    mockMediaCapabilities(createDecodingInfo({ keySystemAccess: access }));
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({ protection: createProtection() }),
+      ],
+    });
+    const streams = (await buildStreams(manifest, DEFAULT_CONFIG)).get(
+      MediaType.VIDEO,
+    );
+    expect(getKeySystemAccess(streams ?? [])).toBe(access);
+  });
+
+  it("returns null for clear streams", async () => {
+    mockMediaCapabilities();
+    const manifest = createManifest({
+      switchingSets: [createVideoSwitchingSet()],
+    });
+    const streams = (await buildStreams(manifest, DEFAULT_CONFIG)).get(
+      MediaType.VIDEO,
+    );
+    expect(getKeySystemAccess(streams ?? [])).toBeNull();
   });
 });

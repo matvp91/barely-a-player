@@ -1,30 +1,156 @@
 import type { DrmConfig, PlayerConfig } from "../config";
-import {
-  PROP_DECODING_INFO,
-  PROP_HIERARCHY,
-  PROP_KEY_SYSTEM_ACCESS,
-} from "../constants";
+import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../constants";
 import { KeySystem } from "../types/drm";
-import type { Manifest, SwitchingSet, Track } from "../types/manifest";
 import type {
-  AudioStream,
-  Preference,
-  Stream,
-  VideoStream,
-} from "../types/media";
+  AudioSwitchingSet,
+  Manifest,
+  Protection,
+  SwitchingSet,
+  Track,
+  VideoSwitchingSet,
+} from "../types/manifest";
+import type { Preference, Stream } from "../types/media";
 import { MediaType } from "../types/media";
 import * as asserts from "./asserts";
 import * as CodecUtils from "./codec_utils";
 import * as Functional from "./functional";
 
+interface RepresentativeSet {
+  switchingSet: VideoSwitchingSet | AudioSwitchingSet;
+  track: Track;
+}
+
+/** A video or audio switching set that carries protection. */
+type ProtectedSwitchingSet = (VideoSwitchingSet | AudioSwitchingSet) & {
+  protection: Protection;
+};
+
+/**
+ * Picks one key system for the whole presentation. Runs a single
+ * `decodingInfo` probe per candidate, combining a representative video
+ * and audio track under one `keySystemConfiguration`. Candidates are
+ * the configured `preferredKeySystems` that also appear in the
+ * manifest, in preference order; the first supported one wins.
+ * Returns `null` for clear content or when nothing is supported.
+ */
+export async function selectKeySystem(
+  manifest: Manifest,
+  drm: DrmConfig,
+): Promise<KeySystem | null> {
+  const protectedSets = manifest.switchingSets.filter(
+    (ss): ss is ProtectedSwitchingSet =>
+      (ss.type === MediaType.VIDEO || ss.type === MediaType.AUDIO) &&
+      ss.protection != null,
+  );
+  if (protectedSets.length === 0) {
+    return null;
+  }
+
+  const present = new Set<KeySystem>();
+  for (const ss of protectedSets) {
+    for (const ks of Object.keys(ss.protection.keySystems)) {
+      present.add(ks as KeySystem);
+    }
+  }
+
+  const video = pickRepresentativeVideo(protectedSets);
+  const audio = pickRepresentativeAudio(protectedSets);
+
+  for (const keySystem of drm.preferredKeySystems) {
+    if (!present.has(keySystem)) {
+      continue;
+    }
+    const config = buildPresentationDecodingConfig(video, audio, keySystem);
+    const info = await navigator.mediaCapabilities.decodingInfo(config);
+    if (info.supported && info.keySystemAccess) {
+      return keySystem;
+    }
+  }
+  return null;
+}
+
+function pickRepresentativeVideo(
+  sets: (VideoSwitchingSet | AudioSwitchingSet)[],
+): RepresentativeSet | null {
+  let best: RepresentativeSet | null = null;
+  for (const ss of sets) {
+    if (ss.type !== MediaType.VIDEO) {
+      continue;
+    }
+    for (const track of ss.tracks) {
+      if (!best || track.bandwidth > best.track.bandwidth) {
+        best = { switchingSet: ss, track };
+      }
+    }
+  }
+  return best;
+}
+
+function pickRepresentativeAudio(
+  sets: (VideoSwitchingSet | AudioSwitchingSet)[],
+): RepresentativeSet | null {
+  for (const ss of sets) {
+    if (ss.type === MediaType.AUDIO && ss.tracks[0]) {
+      return { switchingSet: ss, track: ss.tracks[0] };
+    }
+  }
+  return null;
+}
+
+function buildPresentationDecodingConfig(
+  video: RepresentativeSet | null,
+  audio: RepresentativeSet | null,
+  keySystem: KeySystem,
+): MediaDecodingConfiguration {
+  const ksConfig = buildKeySystemConfig(keySystem);
+  const config: MediaDecodingConfiguration = {
+    type: "media-source",
+    keySystemConfiguration: ksConfig,
+  };
+
+  if (video) {
+    const contentType = CodecUtils.getContentType(
+      MediaType.VIDEO,
+      video.switchingSet.codec,
+    );
+    const track = video.track as Track<MediaType.VIDEO>;
+    config.video = {
+      contentType,
+      width: track.width,
+      height: track.height,
+      bitrate: track.bandwidth,
+      framerate: track.frameRate ?? DEFAULT_VIDEO_FRAMERATE,
+    };
+    ksConfig.video = { robustness: defaultVideoRobustness(keySystem) };
+  }
+
+  if (audio) {
+    const contentType = CodecUtils.getContentType(
+      MediaType.AUDIO,
+      audio.switchingSet.codec,
+    );
+    const track = audio.track as Track<MediaType.AUDIO>;
+    config.audio = {
+      contentType,
+      bitrate: track.bandwidth,
+      channels: String(track.channels ?? DEFAULT_AUDIO_CHANNELS),
+      samplerate: track.sampleRate ?? DEFAULT_AUDIO_SAMPLERATE,
+    };
+    ksConfig.audio = { robustness: defaultAudioRobustness(keySystem) };
+  }
+
+  return config;
+}
+
 export async function buildStreams(
   manifest: Manifest,
   config: PlayerConfig,
 ): Promise<Map<MediaType, Stream[]>> {
+  const keySystem = await selectKeySystem(manifest, config.drm);
   const promises: Promise<Stream | null>[] = [];
   for (const switchingSet of manifest.switchingSets) {
     for (const track of switchingSet.tracks) {
-      promises.push(buildStream(switchingSet, track, config));
+      promises.push(buildStream(switchingSet, track, keySystem));
     }
   }
 
@@ -38,6 +164,28 @@ export async function buildStreams(
   }
 
   return result;
+}
+
+/**
+ * The MediaKeySystemAccess negotiated for the presentation, read from the
+ * first protected stream's decoding-info probe. Returns null for clear
+ * content or when no key system was supported. The access is derived from
+ * the streams on demand — never stored — so EmeController is its only
+ * consumer.
+ */
+export function getKeySystemAccess(
+  streams: Stream[],
+): MediaKeySystemAccess | null {
+  for (const stream of streams) {
+    if (stream.type === MediaType.SUBTITLE) {
+      continue;
+    }
+    const access = stream[PROP_DECODING_INFO].keySystemAccess;
+    if (access) {
+      return access;
+    }
+  }
+  return null;
 }
 
 export function findStreamsMatchingPreferences(
@@ -82,7 +230,7 @@ function matchesPreference(stream: Stream, preference: Preference): boolean {
 async function buildStream(
   switchingSet: SwitchingSet,
   track: Track,
-  config: PlayerConfig,
+  keySystem: KeySystem | null,
 ): Promise<Stream | null> {
   const codec = CodecUtils.getNormalizedCodec(switchingSet.codec);
 
@@ -98,13 +246,13 @@ async function buildStream(
     };
   }
 
-  const info = await probeTrack(track, switchingSet, config);
+  const info = await probeTrack(track, switchingSet, keySystem);
   if (!info.supported) {
     return null;
   }
 
   if (track.type === MediaType.VIDEO && switchingSet.type === MediaType.VIDEO) {
-    const stream: VideoStream = {
+    return {
       type: MediaType.VIDEO,
       codec,
       bandwidth: track.bandwidth,
@@ -113,13 +261,9 @@ async function buildStream(
       [PROP_HIERARCHY]: { switchingSet, track },
       [PROP_DECODING_INFO]: info,
     };
-    if (info.keySystemAccess) {
-      stream[PROP_KEY_SYSTEM_ACCESS] = info.keySystemAccess;
-    }
-    return stream;
   }
   if (track.type === MediaType.AUDIO && switchingSet.type === MediaType.AUDIO) {
-    const stream: AudioStream = {
+    return {
       type: MediaType.AUDIO,
       codec,
       bandwidth: track.bandwidth,
@@ -127,10 +271,6 @@ async function buildStream(
       [PROP_HIERARCHY]: { switchingSet, track },
       [PROP_DECODING_INFO]: info,
     };
-    if (info.keySystemAccess) {
-      stream[PROP_KEY_SYSTEM_ACCESS] = info.keySystemAccess;
-    }
-    return stream;
   }
   throw new Error(`Failed to map track for type ${track.type}`);
 }
@@ -138,54 +278,34 @@ async function buildStream(
 async function probeTrack(
   track: Track,
   switchingSet: SwitchingSet,
-  config: PlayerConfig,
+  keySystem: KeySystem | null,
 ): Promise<MediaCapabilitiesDecodingInfo> {
-  const candidates = candidateKeySystems(switchingSet, config.drm);
-  if (candidates.length === 0) {
+  const protection =
+    switchingSet.type === MediaType.SUBTITLE ? null : switchingSet.protection;
+
+  if (!protection) {
     return navigator.mediaCapabilities.decodingInfo(
       buildDecodingConfig(track, switchingSet),
     );
   }
-  let last: MediaCapabilitiesDecodingInfo | null = null;
-  for (const keySystem of candidates) {
-    const info = await navigator.mediaCapabilities.decodingInfo(
-      buildDecodingConfig(track, switchingSet, keySystem),
-    );
-    if (info.supported) {
-      return info;
-    }
-    last = info;
-  }
-  return (
-    last ?? {
+  if (!keySystem) {
+    // Protected, but no key system is supported for the presentation —
+    // the track cannot be decrypted, so drop it.
+    return {
       supported: false,
       smooth: false,
       powerEfficient: false,
       keySystemAccess: null,
-    }
-  );
-}
-
-function candidateKeySystems(
-  switchingSet: SwitchingSet,
-  drm: DrmConfig,
-): KeySystem[] {
-  if (
-    switchingSet.type === MediaType.AUDIO ||
-    switchingSet.type === MediaType.VIDEO
-  ) {
-    return [...drm.preferredKeySystems];
+    };
   }
-  return [];
+  return navigator.mediaCapabilities.decodingInfo(
+    buildDecodingConfig(track, switchingSet, keySystem),
+  );
 }
 
 const DEFAULT_VIDEO_FRAMERATE = 30;
 const DEFAULT_AUDIO_CHANNELS = "2";
 const DEFAULT_AUDIO_SAMPLERATE = 48_000;
-
-type KeySystemProbeConfig = MediaKeySystemConfiguration & {
-  keySystem: string;
-};
 
 export function buildDecodingConfig(
   track: Track,
@@ -225,33 +345,51 @@ export function buildDecodingConfig(
   }
 
   if (keySystem !== undefined) {
-    const cap: MediaKeySystemMediaCapability = {
-      contentType,
-      robustness: defaultRobustness(keySystem),
-    };
-    const ksConfig: KeySystemProbeConfig = {
-      keySystem,
-      initDataTypes: ["cenc"],
-      distinctiveIdentifier: "optional",
-      persistentState: "optional",
-      sessionTypes: ["temporary"],
+    const ksConfig = buildKeySystemConfig(keySystem);
+    const trackCfg: KeySystemTrackConfiguration = {
+      robustness:
+        track.type === MediaType.VIDEO
+          ? defaultVideoRobustness(keySystem)
+          : defaultAudioRobustness(keySystem),
     };
     if (track.type === MediaType.VIDEO) {
-      ksConfig.videoCapabilities = [cap];
+      ksConfig.video = trackCfg;
     } else {
-      ksConfig.audioCapabilities = [cap];
+      ksConfig.audio = trackCfg;
     }
-    (
-      base as MediaDecodingConfiguration & {
-        keySystemConfiguration: KeySystemProbeConfig;
-      }
-    ).keySystemConfiguration = ksConfig;
+    base.keySystemConfiguration = ksConfig;
   }
 
   return base;
 }
 
-function defaultRobustness(keySystem: KeySystem): string {
+/**
+ * Base EME `keySystemConfiguration` for a `decodingInfo` probe. Callers add
+ * per-track `video`/`audio` robustness.
+ */
+function buildKeySystemConfig(
+  keySystem: KeySystem,
+): MediaCapabilitiesKeySystemConfiguration {
+  return {
+    keySystem,
+    initDataType: initDataTypeForKeySystem(keySystem),
+    distinctiveIdentifier: "optional",
+    persistentState: "optional",
+    sessionTypes: ["temporary"],
+  };
+}
+
+function defaultVideoRobustness(keySystem: KeySystem): string {
+  if (keySystem === KeySystem.WIDEVINE) {
+    return "SW_SECURE_DECODE";
+  }
+  if (keySystem === KeySystem.PLAYREADY) {
+    return "150";
+  }
+  return "";
+}
+
+function defaultAudioRobustness(keySystem: KeySystem): string {
   if (keySystem === KeySystem.WIDEVINE) {
     return "SW_SECURE_CRYPTO";
   }
@@ -259,6 +397,36 @@ function defaultRobustness(keySystem: KeySystem): string {
     return "150";
   }
   return "";
+}
+
+/**
+ * EME Initialization Data Format for the probe (and sessions): the
+ * key-system init-data format, NOT the encryption scheme. Widevine and
+ * PlayReady carry a CENC PSSH box (`"cenc"`) for both cenc- and
+ * cbcs-encrypted content; FairPlay carries an `skd://` content id
+ * (`"skd"`).
+ */
+function initDataTypeForKeySystem(keySystem: KeySystem): string {
+  return keySystem === KeySystem.FAIRPLAY ? "skd" : "cenc";
+}
+
+/**
+ * True when a stream's switching set is protected by a key ID present in
+ * the restricted set (e.g. `output-restricted` / `internal-error`). Clear
+ * and subtitle streams are never restricted.
+ */
+export function isStreamRestricted(
+  stream: Stream,
+  restrictedKeyIds: Set<string>,
+): boolean {
+  if (restrictedKeyIds.size === 0 || stream.type === MediaType.SUBTITLE) {
+    return false;
+  }
+  const protection = stream[PROP_HIERARCHY].switchingSet.protection;
+  if (!protection) {
+    return false;
+  }
+  return restrictedKeyIds.has(protection.defaultKid);
 }
 
 export function pickClosestByBandwidth(

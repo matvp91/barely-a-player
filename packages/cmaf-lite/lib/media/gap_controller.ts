@@ -1,8 +1,8 @@
 import type { MediaAttachedEvent } from "../events";
 import { Events } from "../events";
 import type { Player } from "../player";
-import * as BufferUtils from "../utils/buffer_utils";
 import { Log } from "../utils/log";
+import * as TimeRangesUtils from "../utils/time_ranges_utils";
 import { Timer } from "../utils/timer";
 
 const log = Log.create("GapController");
@@ -71,7 +71,7 @@ export class GapController {
       return;
     }
 
-    const nextStart = BufferUtils.getNextBufferedStart(
+    const nextStart = TimeRangesUtils.getNextBufferedStart(
       media.buffered,
       media.currentTime,
     );

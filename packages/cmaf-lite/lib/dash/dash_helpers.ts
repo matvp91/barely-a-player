@@ -2,9 +2,9 @@ import type * as txml from "txml";
 import {
   keySystemFromSchemeIdUri,
   keySystemInfoFromRaw,
+  normalizeKeyId,
 } from "../drm/drm_utils";
 import type { KeySystem } from "../types/drm";
-import { EncryptionScheme } from "../types/drm";
 import type {
   KeySystemInfo,
   Protection,
@@ -168,7 +168,7 @@ export function resolveLanguage(node: txml.TNode) {
 export function resolveProtection(
   adaptationSet: txml.TNode,
   representations: txml.TNode[],
-): Protection | null {
+): Protection | undefined {
   const firstRepresentation = representations[0];
   const nodes = Functional.firstNonEmpty([
     XmlUtils.children(adaptationSet, "ContentProtection"),
@@ -177,10 +177,9 @@ export function resolveProtection(
   ]);
 
   if (nodes.length === 0) {
-    return null;
+    return undefined;
   }
 
-  let scheme: EncryptionScheme | null = null;
   let defaultKid: string | null = null;
   const keySystems: Partial<Record<KeySystem, KeySystemInfo>> = {};
 
@@ -194,16 +193,11 @@ export function resolveProtection(
       continue;
     }
 
-    // DASH scheme URN for the mp4protection element that carries scheme
-    // and default_KID.
+    // DASH scheme URN for the mp4protection element that carries default_KID.
     if (schemeIdUri === "urn:mpeg:dash:mp4protection:2011") {
-      const value = XmlUtils.attr(node, "value", XmlUtils.parseString);
-      if (value === EncryptionScheme.CENC || value === EncryptionScheme.CBCS) {
-        scheme = value;
-      }
       const kid = XmlUtils.attr(node, "cenc:default_KID", XmlUtils.parseString);
       if (kid) {
-        defaultKid = kid.toLowerCase();
+        defaultKid = normalizeKeyId(kid);
       }
       continue;
     }
@@ -215,13 +209,18 @@ export function resolveProtection(
 
     const value = XmlUtils.attr(node, "value", XmlUtils.parseString);
     const psshText = XmlUtils.text(XmlUtils.child(node, "cenc:pssh"));
-    keySystems[keySystem] = keySystemInfoFromRaw(keySystem, value, psshText);
+    const proText = XmlUtils.text(XmlUtils.child(node, "mspr:pro"));
+    keySystems[keySystem] = keySystemInfoFromRaw(
+      keySystem,
+      value,
+      psshText,
+      proText,
+    );
   }
 
-  asserts.assertExists(scheme, "Missing scheme");
   asserts.assertExists(defaultKid, "Missing cenc:default_KID");
 
-  return { scheme, defaultKid, keySystems };
+  return { defaultKid, keySystems };
 }
 
 export function resolveChannelCount(node: txml.TNode): number | undefined {

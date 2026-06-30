@@ -11,6 +11,7 @@ import type {
   VideoStream,
 } from ".";
 import type { KeySystem } from "./types/drm";
+import type { PlayerError } from "./types/error";
 
 /**
  * Event name constants emitted by the {@link Player}.
@@ -31,7 +32,8 @@ export const Events = {
   BUFFER_FLUSH: "bufferFlush",
   BUFFER_FLUSHED: "bufferFlushed",
   BUFFER_APPEND_ERROR: "bufferAppendError",
-  STREAMS_CREATED: "streamsCreated",
+  STREAMS_UPDATING: "streamsUpdating",
+  STREAMS_UPDATED: "streamsUpdated",
   STREAM_CHANGED: "streamChanged",
   ABR_ADAPT: "abrAdapt",
   TIMELINE_UPDATED: "timelineUpdated",
@@ -39,6 +41,7 @@ export const Events = {
   NETWORK_RESPONSE: "networkResponse",
   KEY_SESSION_CREATED: "keySessionCreated",
   KEY_STATUSES_CHANGED: "keyStatusesChanged",
+  ERROR: "error",
 } as const;
 
 /**
@@ -216,6 +219,17 @@ export interface KeyStatusesChangedEvent {
 }
 
 /**
+ * Fired before the playable stream set is recomputed because key-status
+ * restrictions changed. Carries the normalized (dashless hex) key IDs that
+ * are now restricted, which the stream pipeline applies.
+ *
+ * @public
+ */
+export interface StreamsUpdatingEvent {
+  restrictedKeyIds: Set<string>;
+}
+
+/**
  * Maps each event name to its listener signature.
  *
  * @public
@@ -234,7 +248,8 @@ export interface EventMap {
   [Events.BUFFER_FLUSH]: (event: BufferFlushEvent) => void;
   [Events.BUFFER_APPEND_ERROR]: (event: BufferAppendErrorEvent) => void;
   [Events.BUFFER_FLUSHED]: (event: BufferFlushedEvent) => void;
-  [Events.STREAMS_CREATED]: undefined;
+  [Events.STREAMS_UPDATING]: (event: StreamsUpdatingEvent) => void;
+  [Events.STREAMS_UPDATED]: undefined;
   [Events.STREAM_CHANGED]: (event: StreamChangedEvent) => void;
   [Events.ABR_ADAPT]: (event: AbrAdaptEvent) => void;
   [Events.TIMELINE_UPDATED]: undefined;
@@ -242,4 +257,5 @@ export interface EventMap {
   [Events.NETWORK_RESPONSE]: (event: NetworkResponseEvent) => void;
   [Events.KEY_SESSION_CREATED]: (event: KeySessionCreatedEvent) => void;
   [Events.KEY_STATUSES_CHANGED]: (event: KeyStatusesChangedEvent) => void;
+  [Events.ERROR]: (event: PlayerError) => void;
 }
