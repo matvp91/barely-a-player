@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PROP_DECODING_INFO } from "../../lib/constants";
 import { Events } from "../../lib/events";
 import { Player } from "../../lib/player";
 import { KeySystem } from "../../lib/types/drm";
@@ -12,10 +13,22 @@ import {
 } from "../__framework__/eme";
 import {
   createAudioSwitchingSet,
+  createDecodingInfo,
   createManifest,
   createProtection,
   createVideoSwitchingSet,
 } from "../__framework__/factories";
+
+// A protected video stream carrying the negotiated key-system access in its
+// decoding info — the shape EmeController reads to obtain MediaKeys.
+const protectedVideoStream = (
+  access: MediaKeySystemAccess,
+): Stream<MediaType.VIDEO> =>
+  ({
+    type: MediaType.VIDEO,
+    bandwidth: 1_000_000,
+    [PROP_DECODING_INFO]: createDecodingInfo({ keySystemAccess: access }),
+  }) as unknown as Stream<MediaType.VIDEO>;
 
 // Build a player whose manifest/streams/media report protected content with
 // the given key system access. Uses the real EmeController via the Player ctor.
@@ -36,7 +49,10 @@ const protectedPlayer = (
     ],
   });
   vi.spyOn(player, "getManifest").mockReturnValue(manifest);
-  vi.spyOn(player, "getKeySystemAccess").mockReturnValue(access);
+  vi.spyOn(player, "getStreams").mockImplementation(
+    (type) =>
+      (type === MediaType.VIDEO ? [protectedVideoStream(access)] : []) as never,
+  );
   return { player, access, mediaKeys, manifest, pssh };
 };
 
@@ -47,7 +63,6 @@ afterEach(() => {
 describe("EmeController", () => {
   it("does nothing for clear content (no key system access)", async () => {
     const player = new Player();
-    vi.spyOn(player, "getKeySystemAccess").mockReturnValue(null);
     vi.spyOn(player, "getManifest").mockReturnValue(createManifest());
     const media = new FakeMediaElement();
     player.emit(Events.STREAMS_UPDATED);
@@ -206,13 +221,10 @@ describe("EmeController", () => {
   it("emits STREAMS_UPDATING with the restricted key ids and stays non-fatal while a playable stream remains", async () => {
     vi.useFakeTimers();
     try {
-      const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
+      const { player, mediaKeys, access } = protectedPlayer(KeySystem.WIDEVINE);
       // After the restriction is applied the audio set is empty, but a
       // video stream remains playable — so the presentation is not fatal.
-      const videoStream = {
-        type: MediaType.VIDEO,
-        bandwidth: 2_000_000,
-      } as unknown as Stream<MediaType.VIDEO>;
+      const videoStream = protectedVideoStream(access);
       vi.spyOn(player, "getStreams").mockImplementation(
         (type) => (type === MediaType.VIDEO ? [videoStream] : []) as never,
       );
@@ -245,7 +257,12 @@ describe("EmeController", () => {
     const mediaKeys = new FakeMediaKeys();
     const player = new Player();
     const access = createFakeKeySystemAccess(KeySystem.WIDEVINE, mediaKeys);
-    vi.spyOn(player, "getKeySystemAccess").mockReturnValue(access);
+    vi.spyOn(player, "getStreams").mockImplementation(
+      (type) =>
+        (type === MediaType.VIDEO
+          ? [protectedVideoStream(access)]
+          : []) as never,
+    );
     // Protected, but no pssh for Widevine (only default_KID in practice).
     vi.spyOn(player, "getManifest").mockReturnValue(
       createManifest({
@@ -295,7 +312,6 @@ describe("EmeController", () => {
 
   it("emits NO_SUPPORTED_KEY_SYSTEM for protected content with no usable key system", async () => {
     const player = new Player();
-    vi.spyOn(player, "getKeySystemAccess").mockReturnValue(null);
     vi.spyOn(player, "getManifest").mockReturnValue(
       createManifest({
         switchingSets: [
@@ -321,10 +337,19 @@ describe("EmeController", () => {
   it("goes fatal with KEY_STATUS_RESTRICTED when no playable stream remains", async () => {
     vi.useFakeTimers();
     try {
-      const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
-      // The restriction leaves neither audio nor video with a playable
-      // stream, so the presentation can no longer continue.
-      vi.spyOn(player, "getStreams").mockReturnValue([] as never);
+      const { player, mediaKeys, access } = protectedPlayer(KeySystem.WIDEVINE);
+      // Playable at activation (video carries the key-system access), then the
+      // restriction removes the last playable stream — leaving nothing.
+      let restricted = false;
+      vi.spyOn(player, "getStreams").mockImplementation(
+        (type) =>
+          (!restricted && type === MediaType.VIDEO
+            ? [protectedVideoStream(access)]
+            : []) as never,
+      );
+      player.on(Events.STREAMS_UPDATING, () => {
+        restricted = true;
+      });
       const onError = vi.fn();
       player.on(Events.ERROR, onError);
       const media = new FakeMediaElement();
@@ -383,7 +408,12 @@ describe("EmeController", () => {
     const mediaKeys = new FakeMediaKeys();
     const player = new Player();
     const access = createFakeKeySystemAccess(KeySystem.WIDEVINE, mediaKeys);
-    vi.spyOn(player, "getKeySystemAccess").mockReturnValue(access);
+    vi.spyOn(player, "getStreams").mockImplementation(
+      (type) =>
+        (type === MediaType.VIDEO
+          ? [protectedVideoStream(access)]
+          : []) as never,
+    );
     vi.spyOn(player, "getManifest").mockReturnValue(
       createManifest({
         switchingSets: [

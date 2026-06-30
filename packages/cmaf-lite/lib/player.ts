@@ -130,14 +130,6 @@ export class Player extends EventEmitter<EventMap> {
   }
 
   /**
-   * Returns the MediaKeySystemAccess chosen for the protected
-   * presentation, or null for clear content / no supported key system.
-   */
-  getKeySystemAccess() {
-    return this.streamController_.getKeySystemAccess();
-  }
-
-  /**
    * Returns the currently active stream for the given type.
    */
   getActiveStream<T extends MediaType>(type: T) {

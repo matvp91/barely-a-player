@@ -15,12 +15,6 @@ import * as asserts from "./asserts";
 import * as CodecUtils from "./codec_utils";
 import * as Functional from "./functional";
 
-/** A chosen key system and the access used to create its MediaKeys. */
-export interface KeySystemSelection {
-  keySystem: KeySystem;
-  access: MediaKeySystemAccess;
-}
-
 interface RepresentativeSet {
   switchingSet: VideoSwitchingSet | AudioSwitchingSet;
   track: Track;
@@ -42,7 +36,7 @@ type ProtectedSwitchingSet = (VideoSwitchingSet | AudioSwitchingSet) & {
 export async function selectKeySystem(
   manifest: Manifest,
   drm: DrmConfig,
-): Promise<KeySystemSelection | null> {
+): Promise<KeySystem | null> {
   const protectedSets = manifest.switchingSets.filter(
     (ss): ss is ProtectedSwitchingSet =>
       (ss.type === MediaType.VIDEO || ss.type === MediaType.AUDIO) &&
@@ -69,7 +63,7 @@ export async function selectKeySystem(
     const config = buildPresentationDecodingConfig(video, audio, keySystem);
     const info = await navigator.mediaCapabilities.decodingInfo(config);
     if (info.supported && info.keySystemAccess) {
-      return { keySystem, access: info.keySystemAccess };
+      return keySystem;
     }
   }
   return null;
@@ -156,13 +150,13 @@ function buildPresentationDecodingConfig(
 
 export async function buildStreams(
   manifest: Manifest,
-  _config: PlayerConfig,
-  selection?: KeySystemSelection | null,
+  config: PlayerConfig,
 ): Promise<Map<MediaType, Stream[]>> {
+  const keySystem = await selectKeySystem(manifest, config.drm);
   const promises: Promise<Stream | null>[] = [];
   for (const switchingSet of manifest.switchingSets) {
     for (const track of switchingSet.tracks) {
-      promises.push(buildStream(switchingSet, track, selection ?? null));
+      promises.push(buildStream(switchingSet, track, keySystem));
     }
   }
 
@@ -176,6 +170,28 @@ export async function buildStreams(
   }
 
   return result;
+}
+
+/**
+ * The MediaKeySystemAccess negotiated for the presentation, read from the
+ * first protected stream's decoding-info probe. Returns null for clear
+ * content or when no key system was supported. The access is derived from
+ * the streams on demand — never stored — so EmeController is its only
+ * consumer.
+ */
+export function getKeySystemAccess(
+  streams: Stream[],
+): MediaKeySystemAccess | null {
+  for (const stream of streams) {
+    if (stream.type === MediaType.SUBTITLE) {
+      continue;
+    }
+    const access = stream[PROP_DECODING_INFO].keySystemAccess;
+    if (access) {
+      return access;
+    }
+  }
+  return null;
 }
 
 export function findStreamsMatchingPreferences(
@@ -220,7 +236,7 @@ function matchesPreference(stream: Stream, preference: Preference): boolean {
 async function buildStream(
   switchingSet: SwitchingSet,
   track: Track,
-  selection: KeySystemSelection | null,
+  keySystem: KeySystem | null,
 ): Promise<Stream | null> {
   const codec = CodecUtils.getNormalizedCodec(switchingSet.codec);
 
@@ -236,7 +252,7 @@ async function buildStream(
     };
   }
 
-  const info = await probeTrack(track, switchingSet, selection);
+  const info = await probeTrack(track, switchingSet, keySystem);
   if (!info.supported) {
     return null;
   }
@@ -268,7 +284,7 @@ async function buildStream(
 async function probeTrack(
   track: Track,
   switchingSet: SwitchingSet,
-  selection: KeySystemSelection | null,
+  keySystem: KeySystem | null,
 ): Promise<MediaCapabilitiesDecodingInfo> {
   const protection =
     switchingSet.type === MediaType.SUBTITLE ? null : switchingSet.protection;
@@ -278,8 +294,8 @@ async function probeTrack(
       buildDecodingConfig(track, switchingSet),
     );
   }
-  if (!selection) {
-    // Protected, but no key system was selected for the presentation —
+  if (!keySystem) {
+    // Protected, but no key system is supported for the presentation —
     // the track cannot be decrypted, so drop it.
     return {
       supported: false,
@@ -289,7 +305,7 @@ async function probeTrack(
     };
   }
   return navigator.mediaCapabilities.decodingInfo(
-    buildDecodingConfig(track, switchingSet, selection.keySystem),
+    buildDecodingConfig(track, switchingSet, keySystem),
   );
 }
 

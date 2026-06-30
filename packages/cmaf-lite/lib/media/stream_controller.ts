@@ -40,7 +40,6 @@ export class StreamController {
   private rangeEnd_ = 0;
   private streams_ = new Map<MediaType, Stream[]>();
   private restrictedKeyIds_ = new Set<string>();
-  private keySystemAccess_: MediaKeySystemAccess | null = null;
   private activeStream_ = new Map<MediaType, Stream>();
   private media_: HTMLMediaElement | null = null;
   private mediaStates_ = new Map<MediaType, MediaState>();
@@ -63,10 +62,6 @@ export class StreamController {
     return list.filter(
       (s) => !StreamUtils.isStreamRestricted(s, this.restrictedKeyIds_),
     ) as Stream<T>[];
-  }
-
-  getKeySystemAccess() {
-    return this.keySystemAccess_;
   }
 
   getActiveStream<T extends MediaType>(type: T) {
@@ -103,16 +98,7 @@ export class StreamController {
 
     if (!event.isUpdate) {
       const config = this.player_.getConfig();
-      const selection = await StreamUtils.selectKeySystem(
-        event.manifest,
-        config.drm,
-      );
-      this.keySystemAccess_ = selection?.access ?? null;
-      this.streams_ = await StreamUtils.buildStreams(
-        event.manifest,
-        config,
-        selection,
-      );
+      this.streams_ = await StreamUtils.buildStreams(event.manifest, config);
       log.info("Streams", this.streams_);
       this.player_.emit(Events.STREAMS_UPDATED);
       this.tryStart_();

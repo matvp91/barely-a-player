@@ -11,6 +11,7 @@ import {
   buildDecodingConfig,
   buildStreams,
   findStreamsMatchingPreferences,
+  getKeySystemAccess,
   isStreamRestricted,
   pickClosestByBandwidth,
   selectKeySystem,
@@ -556,8 +557,7 @@ describe("selectKeySystem", () => {
       }),
       { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
     );
-    expect(selection?.keySystem).toBe(KeySystem.WIDEVINE);
-    expect(selection?.access.keySystem).toBe(KeySystem.WIDEVINE);
+    expect(selection).toBe(KeySystem.WIDEVINE);
   });
 
   it("probes a single config carrying both video and audio capabilities", async () => {
@@ -628,8 +628,7 @@ describe("selectKeySystem", () => {
       },
     );
     // PlayReady is first in preference order, so it wins even though both are supported.
-    expect(selection?.keySystem).toBe(KeySystem.PLAYREADY);
-    expect(selection?.access.keySystem).toBe(KeySystem.PLAYREADY);
+    expect(selection).toBe(KeySystem.PLAYREADY);
   });
 
   it("returns null when no preferred key system probes supported", async () => {
@@ -660,14 +659,8 @@ describe("isStreamRestricted", () => {
         }),
       ],
     });
-    const selection = {
-      keySystem: KeySystem.WIDEVINE,
-      access: createKeySystemAccess(KeySystem.WIDEVINE),
-    };
     const list =
-      (await buildStreams(manifest, DEFAULT_CONFIG, selection)).get(
-        MediaType.VIDEO,
-      ) ?? [];
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     return list[0]!;
   };
 
@@ -700,14 +693,8 @@ describe("buildStreams (protected)", () => {
         createVideoSwitchingSet({ protection: createProtection() }),
       ],
     });
-    const selection = {
-      keySystem: KeySystem.WIDEVINE,
-      access: createKeySystemAccess(KeySystem.WIDEVINE),
-    };
     const list =
-      (await buildStreams(manifest, DEFAULT_CONFIG, selection)).get(
-        MediaType.VIDEO,
-      ) ?? [];
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     expect(list).toHaveLength(1);
   });
 
@@ -719,9 +706,34 @@ describe("buildStreams (protected)", () => {
       ],
     });
     const list =
-      (await buildStreams(manifest, DEFAULT_CONFIG, null)).get(
-        MediaType.VIDEO,
-      ) ?? [];
+      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     expect(list).toHaveLength(0);
+  });
+});
+
+describe("getKeySystemAccess", () => {
+  it("returns the access from the first protected stream's decoding info", async () => {
+    const access = createKeySystemAccess(KeySystem.WIDEVINE);
+    mockMediaCapabilities(createDecodingInfo({ keySystemAccess: access }));
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({ protection: createProtection() }),
+      ],
+    });
+    const streams = (await buildStreams(manifest, DEFAULT_CONFIG)).get(
+      MediaType.VIDEO,
+    );
+    expect(getKeySystemAccess(streams ?? [])).toBe(access);
+  });
+
+  it("returns null for clear streams", async () => {
+    mockMediaCapabilities();
+    const manifest = createManifest({
+      switchingSets: [createVideoSwitchingSet()],
+    });
+    const streams = (await buildStreams(manifest, DEFAULT_CONFIG)).get(
+      MediaType.VIDEO,
+    );
+    expect(getKeySystemAccess(streams ?? [])).toBeNull();
   });
 });

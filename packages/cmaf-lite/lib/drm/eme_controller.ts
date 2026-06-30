@@ -10,6 +10,7 @@ import { ABORTED, NetworkRequestType } from "../types/net";
 import * as BufferUtils from "../utils/buffer_utils";
 import { Log } from "../utils/log";
 import { buildPlayReadyRequest } from "../utils/playready_utils";
+import * as StreamUtils from "../utils/stream_utils";
 import { Timer } from "../utils/timer";
 import { classifyKeyStatuses, hasProtectedContent } from "./drm_utils";
 import { SessionManager } from "./session_manager";
@@ -73,7 +74,10 @@ export class EmeController {
     if (!this.media_ || this.sessionManager_) {
       return;
     }
-    const access = this.player_.getKeySystemAccess();
+    const access = StreamUtils.getKeySystemAccess([
+      ...this.player_.getStreams(MediaType.VIDEO),
+      ...this.player_.getStreams(MediaType.AUDIO),
+    ]);
     if (!access) {
       if (
         !this.noKeySystemReported_ &&
