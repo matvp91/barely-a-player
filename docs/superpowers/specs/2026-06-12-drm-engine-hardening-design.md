@@ -59,7 +59,15 @@ each behavioral fix on the clean foundation.
 10. **Smaller:** Widevine default video robustness should be
     `SW_SECURE_DECODE` (audio `SW_SECURE_CRYPTO`); PlayReady unwrap should
     copy `SOAPAction`/`Content-Type` envelope headers (default
-    `text/xml; charset=utf-8`); manifest `dashif:Laurl` unsupported.
+    `text/xml; charset=utf-8`).
+
+### Deliberately out of scope (resolved ambiguity)
+
+Manifest-embedded license URLs (`dashif:Laurl` / `ms:laurl` / PlayReady
+`LA_URL`) are **not** supported: license URLs come from `drm.licenseUrls`
+config only. Earlier drafts mentioned a manifest fallback in two places;
+this is the "lite" resolution — it keeps the manifest model and DASH parser
+untouched. If needed later it is a small, additive change.
 
 ### Out of scope by design
 
