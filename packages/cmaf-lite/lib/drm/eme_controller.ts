@@ -9,10 +9,7 @@ import { MediaType } from "../types/media";
 import { ABORTED, NetworkRequestType } from "../types/net";
 import * as BufferUtils from "../utils/buffer_utils";
 import { Log } from "../utils/log";
-import {
-  playReadyRequestHeaders,
-  unwrapPlayReadyChallenge,
-} from "../utils/playready_utils";
+import { buildPlayReadyRequest } from "../utils/playready_utils";
 import { isStreamRestricted } from "../utils/stream_utils";
 import { Timer } from "../utils/timer";
 import { classifyKeyStatuses, hasProtectedContent } from "./drm_utils";
@@ -212,8 +209,9 @@ export class EmeController {
       let body: BodyInit = event.message;
       let headers: Headers | undefined;
       if (manager.keySystem === KeySystem.PLAYREADY) {
-        body = unwrapPlayReadyChallenge(event.message);
-        headers = playReadyRequestHeaders(event.message);
+        const request = buildPlayReadyRequest(event.message);
+        body = request.body;
+        headers = request.headers;
       }
       const url = this.player_.getConfig().drm.licenseUrls[manager.keySystem];
       if (!url) {

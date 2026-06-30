@@ -488,8 +488,8 @@ describe("EmeController", () => {
       mediaSource: {} as MediaSource,
     });
     await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
-    // Emit a plain (non-envelope) message — unwrapPlayReadyChallenge returns
-    // it unchanged; playReadyRequestHeaders defaults to text/xml; charset=utf-8.
+    // Emit a plain (non-envelope) message — buildPlayReadyRequest returns
+    // body unchanged and defaults headers to text/xml; charset=utf-8.
     mediaKeys.sessions[0]!.emitMessage(new Uint8Array([1, 2, 3]));
     await vi.waitFor(() => expect(capturedHeaders).toBeDefined());
     expect(capturedHeaders!.get("Content-Type")).toBe(
