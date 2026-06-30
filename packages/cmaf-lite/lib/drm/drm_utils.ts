@@ -63,3 +63,39 @@ export function keySystemInfoFromRaw(
     pssh: StringUtils.decodeBase64(trimmedPsshText),
   };
 }
+
+/**
+ * Verdict from a batch of key statuses. `restrictedKeyIds` holds the
+ * normalized (dashless, lowercase hex) key IDs whose keys cannot be used
+ * for playback.
+ */
+export interface KeyStatusVerdict {
+  allExpired: boolean;
+  restrictedKeyIds: Set<string>;
+}
+
+/**
+ * Classifies a merged key-status map. `expired` across the board is fatal
+ * (handled by the caller); `internal-error`/`output-restricted` keys
+ * restrict their streams; every other status is usable.
+ */
+export function classifyKeyStatuses(
+  statuses: Map<string, MediaKeyStatus>,
+): KeyStatusVerdict {
+  const restrictedKeyIds = new Set<string>();
+  let allExpired = statuses.size > 0;
+  for (const [keyId, status] of statuses) {
+    if (status !== "expired") {
+      allExpired = false;
+    }
+    if (status === "internal-error" || status === "output-restricted") {
+      restrictedKeyIds.add(keyId);
+    }
+  }
+  return { allExpired, restrictedKeyIds };
+}
+
+/** Normalizes a key ID to dashless lowercase hex for comparison. */
+export function normalizeKeyId(keyId: string): string {
+  return keyId.replace(/-/g, "").toLowerCase();
+}

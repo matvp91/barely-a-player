@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyKeyStatuses,
   hasProtectedContent,
   keySystemFromSchemeIdUri,
   keySystemInfoFromRaw,
+  normalizeKeyId,
 } from "../../lib/drm/drm_utils";
 import { KeySystem } from "../../lib/types/drm";
 import {
@@ -96,5 +98,53 @@ describe("hasProtectedContent", () => {
 
   it("is false for clear content", () => {
     expect(hasProtectedContent(createManifest())).toBe(false);
+  });
+});
+
+describe("classifyKeyStatuses", () => {
+  it("reports allExpired when every key is expired", () => {
+    const v = classifyKeyStatuses(
+      new Map([
+        ["aa", "expired"],
+        ["bb", "expired"],
+      ]),
+    );
+    expect(v.allExpired).toBe(true);
+    expect(v.restrictedKeyIds.size).toBe(0);
+  });
+
+  it("does not report allExpired when any key is not expired", () => {
+    const v = classifyKeyStatuses(
+      new Map([
+        ["aa", "expired"],
+        ["bb", "usable"],
+      ]),
+    );
+    expect(v.allExpired).toBe(false);
+  });
+
+  it("collects internal-error and output-restricted keys as restricted", () => {
+    const v = classifyKeyStatuses(
+      new Map<string, MediaKeyStatus>([
+        ["aa", "usable"],
+        ["bb", "output-restricted"],
+        ["cc", "internal-error"],
+      ]),
+    );
+    expect([...v.restrictedKeyIds].sort()).toEqual(["bb", "cc"]);
+  });
+
+  it("treats an empty map as not expired with no restrictions", () => {
+    const v = classifyKeyStatuses(new Map());
+    expect(v.allExpired).toBe(false);
+    expect(v.restrictedKeyIds.size).toBe(0);
+  });
+});
+
+describe("normalizeKeyId", () => {
+  it("strips dashes and lowercases", () => {
+    expect(normalizeKeyId("ABCDEF01-2345-6789-ABCD-EF0123456789")).toBe(
+      "abcdef0123456789abcdef0123456789",
+    );
   });
 });
