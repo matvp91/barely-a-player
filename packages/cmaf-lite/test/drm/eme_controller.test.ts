@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PROP_HIERARCHY } from "../../lib/constants";
 import { Events } from "../../lib/events";
 import { Player } from "../../lib/player";
 import { KeySystem } from "../../lib/types/drm";
@@ -51,7 +50,7 @@ describe("EmeController", () => {
     vi.spyOn(player, "getKeySystemAccess").mockReturnValue(null);
     vi.spyOn(player, "getManifest").mockReturnValue(createManifest());
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -63,7 +62,7 @@ describe("EmeController", () => {
   it("creates a manifest PSSH session and attaches eagerly for Widevine", async () => {
     const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -81,7 +80,7 @@ describe("EmeController", () => {
   it("defers attach to the encrypted event for FairPlay", async () => {
     const { player, mediaKeys } = protectedPlayer(KeySystem.FAIRPLAY);
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -108,7 +107,7 @@ describe("EmeController", () => {
       promise: Promise.resolve({ arrayBuffer: responseBytes.buffer }),
     } as never);
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -128,7 +127,7 @@ describe("EmeController", () => {
     const created = vi.fn();
     player.on(Events.KEY_SESSION_CREATED, created);
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -144,7 +143,7 @@ describe("EmeController", () => {
     const onError = vi.fn();
     player.on(Events.ERROR, onError);
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -163,7 +162,7 @@ describe("EmeController", () => {
     const changed = vi.fn();
     player.on(Events.KEY_STATUSES_CHANGED, changed);
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -185,7 +184,7 @@ describe("EmeController", () => {
       const onError = vi.fn();
       player.on(Events.ERROR, onError);
       const media = new FakeMediaElement();
-      player.emit(Events.STREAMS_CREATED);
+      player.emit(Events.STREAMS_UPDATED);
       player.emit(Events.MEDIA_ATTACHED, {
         media: media as unknown as HTMLMediaElement,
         mediaSource: {} as MediaSource,
@@ -204,18 +203,25 @@ describe("EmeController", () => {
     }
   });
 
-  it("records restricted key ids and emits RESTRICTIONS_UPDATED without going fatal when a playable stream remains", async () => {
+  it("emits STREAMS_UPDATING with the restricted key ids and stays non-fatal while a playable stream remains", async () => {
     vi.useFakeTimers();
     try {
       const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
-      // A non-restricted clear stream remains playable.
-      vi.spyOn(player, "getStreams").mockReturnValue([] as never);
+      // After the restriction is applied the audio set is empty, but a
+      // video stream remains playable — so the presentation is not fatal.
+      const videoStream = {
+        type: MediaType.VIDEO,
+        bandwidth: 2_000_000,
+      } as unknown as Stream<MediaType.VIDEO>;
+      vi.spyOn(player, "getStreams").mockImplementation(
+        (type) => (type === MediaType.VIDEO ? [videoStream] : []) as never,
+      );
       const onError = vi.fn();
-      const onRestrictions = vi.fn();
+      const onUpdating = vi.fn();
       player.on(Events.ERROR, onError);
-      player.on(Events.RESTRICTIONS_UPDATED, onRestrictions);
+      player.on(Events.STREAMS_UPDATING, onUpdating);
       const media = new FakeMediaElement();
-      player.emit(Events.STREAMS_CREATED);
+      player.emit(Events.STREAMS_UPDATED);
       player.emit(Events.MEDIA_ATTACHED, {
         media: media as unknown as HTMLMediaElement,
         mediaSource: {} as MediaSource,
@@ -224,8 +230,11 @@ describe("EmeController", () => {
       mediaKeys.sessions[0]!.setKeyStatus("dd", "output-restricted");
       mediaKeys.sessions[0]!.emitKeyStatusesChange();
       await vi.advanceTimersByTimeAsync(500);
-      expect(player.getRestrictedKeyIds().has("dd")).toBe(true);
-      expect(onRestrictions).toHaveBeenCalled();
+      expect(onUpdating).toHaveBeenCalledOnce();
+      expect(onUpdating.mock.calls[0]![0].restrictedKeyIds.has("dd")).toBe(
+        true,
+      );
+      // Video remains playable, so a fully-restricted audio set is not fatal.
       expect(onError).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -250,7 +259,7 @@ describe("EmeController", () => {
       }),
     );
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -266,7 +275,7 @@ describe("EmeController", () => {
   it("creates sessions for new PSSH on manifest update (key rotation)", async () => {
     const { player, mediaKeys, manifest } = protectedPlayer(KeySystem.WIDEVINE);
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -297,7 +306,7 @@ describe("EmeController", () => {
     const onError = vi.fn();
     player.on(Events.ERROR, onError);
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -309,151 +318,23 @@ describe("EmeController", () => {
     });
   });
 
-  it("does not go fatal when only audio is fully restricted but video remains playable", async () => {
+  it("goes fatal with KEY_STATUS_RESTRICTED when no playable stream remains", async () => {
     vi.useFakeTimers();
     try {
       const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
-      // Restricted audio key id: "dd". Video stream uses a different key.
-      const audioStream: Stream<MediaType.AUDIO> = {
-        type: MediaType.AUDIO,
-        codec: "mp4a.40.2",
-        bandwidth: 128_000,
-        language: "unk",
-        [PROP_HIERARCHY]: {
-          switchingSet: createAudioSwitchingSet({
-            protection: createProtection({ defaultKid: "dd" }),
-          }),
-          track: {
-            id: "a1",
-            type: MediaType.AUDIO,
-            bandwidth: 128_000,
-            segments: [],
-            maxSegmentDuration: 4,
-          },
-        },
-        [Symbol("decodingInfo")]: {} as MediaCapabilitiesDecodingInfo,
-      } as unknown as Stream<MediaType.AUDIO>;
-      const videoStream: Stream<MediaType.VIDEO> = {
-        type: MediaType.VIDEO,
-        codec: "avc1.64001f",
-        bandwidth: 2_000_000,
-        width: 1920,
-        height: 1080,
-        [PROP_HIERARCHY]: {
-          switchingSet: createVideoSwitchingSet({
-            protection: createProtection({ defaultKid: "ee" }),
-          }),
-          track: {
-            id: "v1",
-            type: MediaType.VIDEO,
-            bandwidth: 2_000_000,
-            width: 1920,
-            height: 1080,
-            segments: [],
-            maxSegmentDuration: 4,
-          },
-        },
-        [Symbol("decodingInfo")]: {} as MediaCapabilitiesDecodingInfo,
-      } as unknown as Stream<MediaType.VIDEO>;
-      vi.spyOn(player, "getStreams").mockImplementation((type) => {
-        if (type === MediaType.AUDIO) {
-          return [audioStream] as never;
-        }
-        if (type === MediaType.VIDEO) {
-          return [videoStream] as never;
-        }
-        return [] as never;
-      });
+      // The restriction leaves neither audio nor video with a playable
+      // stream, so the presentation can no longer continue.
+      vi.spyOn(player, "getStreams").mockReturnValue([] as never);
       const onError = vi.fn();
-      const onRestrictions = vi.fn();
       player.on(Events.ERROR, onError);
-      player.on(Events.RESTRICTIONS_UPDATED, onRestrictions);
       const media = new FakeMediaElement();
-      player.emit(Events.STREAMS_CREATED);
+      player.emit(Events.STREAMS_UPDATED);
       player.emit(Events.MEDIA_ATTACHED, {
         media: media as unknown as HTMLMediaElement,
         mediaSource: {} as MediaSource,
       });
       await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
-      // Restrict the audio key only.
       mediaKeys.sessions[0]!.setKeyStatus("dd", "output-restricted");
-      mediaKeys.sessions[0]!.emitKeyStatusesChange();
-      await vi.advanceTimersByTimeAsync(500);
-      expect(onRestrictions).toHaveBeenCalled();
-      expect(player.getRestrictedKeyIds().has("dd")).toBe(true);
-      // Video is still playable — must NOT be fatal.
-      expect(onError).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("goes fatal when both audio and video are fully restricted", async () => {
-    vi.useFakeTimers();
-    try {
-      const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
-      const audioStream: Stream<MediaType.AUDIO> = {
-        type: MediaType.AUDIO,
-        codec: "mp4a.40.2",
-        bandwidth: 128_000,
-        language: "unk",
-        [PROP_HIERARCHY]: {
-          switchingSet: createAudioSwitchingSet({
-            protection: createProtection({ defaultKid: "dd" }),
-          }),
-          track: {
-            id: "a1",
-            type: MediaType.AUDIO,
-            bandwidth: 128_000,
-            segments: [],
-            maxSegmentDuration: 4,
-          },
-        },
-        [Symbol("decodingInfo")]: {} as MediaCapabilitiesDecodingInfo,
-      } as unknown as Stream<MediaType.AUDIO>;
-      const videoStream: Stream<MediaType.VIDEO> = {
-        type: MediaType.VIDEO,
-        codec: "avc1.64001f",
-        bandwidth: 2_000_000,
-        width: 1920,
-        height: 1080,
-        [PROP_HIERARCHY]: {
-          switchingSet: createVideoSwitchingSet({
-            protection: createProtection({ defaultKid: "ee" }),
-          }),
-          track: {
-            id: "v1",
-            type: MediaType.VIDEO,
-            bandwidth: 2_000_000,
-            width: 1920,
-            height: 1080,
-            segments: [],
-            maxSegmentDuration: 4,
-          },
-        },
-        [Symbol("decodingInfo")]: {} as MediaCapabilitiesDecodingInfo,
-      } as unknown as Stream<MediaType.VIDEO>;
-      vi.spyOn(player, "getStreams").mockImplementation((type) => {
-        if (type === MediaType.AUDIO) {
-          return [audioStream] as never;
-        }
-        if (type === MediaType.VIDEO) {
-          return [videoStream] as never;
-        }
-        return [] as never;
-      });
-      const onError = vi.fn();
-      player.on(Events.ERROR, onError);
-      const media = new FakeMediaElement();
-      player.emit(Events.STREAMS_CREATED);
-      player.emit(Events.MEDIA_ATTACHED, {
-        media: media as unknown as HTMLMediaElement,
-        mediaSource: {} as MediaSource,
-      });
-      await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
-      // Restrict both keys: audio "dd" and video "ee".
-      mediaKeys.sessions[0]!.setKeyStatus("dd", "output-restricted");
-      mediaKeys.sessions[0]!.setKeyStatus("ee", "output-restricted");
       mediaKeys.sessions[0]!.emitKeyStatusesChange();
       await vi.advanceTimersByTimeAsync(500);
       expect(onError).toHaveBeenCalledOnce();
@@ -482,7 +363,7 @@ describe("EmeController", () => {
       },
     );
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,
@@ -534,7 +415,7 @@ describe("EmeController", () => {
     const onError = vi.fn();
     player.on(Events.ERROR, onError);
     const media = new FakeMediaElement();
-    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.STREAMS_UPDATED);
     player.emit(Events.MEDIA_ATTACHED, {
       media: media as unknown as HTMLMediaElement,
       mediaSource: {} as MediaSource,

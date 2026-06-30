@@ -64,10 +64,10 @@ describe("StreamController restrictions", () => {
     });
 
     // Drive the controller's internal streams_ via the real MANIFEST_UPDATED
-    // path so that onRestrictionsUpdated_ has streams to iterate.
+    // path so that onStreamsUpdating_ has streams to iterate.
     player.emit(Events.MANIFEST_UPDATED, { manifest, isUpdate: false });
 
-    // onManifestUpdated_ is async — wait for STREAMS_CREATED which fires
+    // onManifestUpdated_ is async — wait for STREAMS_UPDATED which fires
     // after this.streams_ is populated.
     await vi.waitFor(() => {
       expect(player.getStreams(MediaType.VIDEO)).toHaveLength(2);
@@ -85,8 +85,9 @@ describe("StreamController restrictions", () => {
     expect(player.getActiveStream(MediaType.VIDEO)).toBe(restrictedStream);
 
     // Restrict the key ID that belongs to the first stream.
-    player.setRestrictedKeyIds(new Set(["aaaaaaaa000000000000000000000000"]));
-    player.emit(Events.RESTRICTIONS_UPDATED);
+    player.emit(Events.STREAMS_UPDATING, {
+      restrictedKeyIds: new Set(["aaaaaaaa000000000000000000000000"]),
+    });
 
     // StreamController must have switched the active stream to the
     // non-restricted one.

@@ -10,7 +10,6 @@ import { ABORTED, NetworkRequestType } from "../types/net";
 import * as BufferUtils from "../utils/buffer_utils";
 import { Log } from "../utils/log";
 import { buildPlayReadyRequest } from "../utils/playready_utils";
-import { isStreamRestricted } from "../utils/stream_utils";
 import { Timer } from "../utils/timer";
 import { classifyKeyStatuses, hasProtectedContent } from "./drm_utils";
 import { SessionManager } from "./session_manager";
@@ -36,7 +35,7 @@ export class EmeController {
   private statusTimer_ = new Timer(() => this.flushKeyStatuses_());
 
   constructor(private player_: Player) {
-    this.player_.on(Events.STREAMS_CREATED, this.onStreamsCreated_);
+    this.player_.on(Events.STREAMS_UPDATED, this.onStreamsUpdated_);
     this.player_.on(Events.MEDIA_ATTACHED, this.onMediaAttached_);
     this.player_.on(Events.MEDIA_DETACHING, this.onMediaDetaching_);
     this.player_.on(Events.MANIFEST_UPDATED, this.onManifestUpdated_);
@@ -44,13 +43,13 @@ export class EmeController {
 
   destroy() {
     this.teardown_();
-    this.player_.off(Events.STREAMS_CREATED, this.onStreamsCreated_);
+    this.player_.off(Events.STREAMS_UPDATED, this.onStreamsUpdated_);
     this.player_.off(Events.MEDIA_ATTACHED, this.onMediaAttached_);
     this.player_.off(Events.MEDIA_DETACHING, this.onMediaDetaching_);
     this.player_.off(Events.MANIFEST_UPDATED, this.onManifestUpdated_);
   }
 
-  private onStreamsCreated_ = async () => {
+  private onStreamsUpdated_ = async () => {
     await this.maybeActivate_();
   };
 
@@ -282,32 +281,22 @@ export class EmeController {
       );
       return;
     }
-    this.player_.setRestrictedKeyIds(verdict.restrictedKeyIds);
-    this.player_.emit(Events.RESTRICTIONS_UPDATED);
-    if (this.noPlayableStream_(verdict.restrictedKeyIds)) {
+    // Hand the restrictions to the stream pipeline; it recomputes the
+    // playable set (filtering getStreams, switching the active stream) and
+    // emits STREAMS_UPDATED. emit is synchronous, so getStreams below
+    // already reflects the new set.
+    this.player_.emit(Events.STREAMS_UPDATING, {
+      restrictedKeyIds: verdict.restrictedKeyIds,
+    });
+    if (
+      this.player_.getStreams(MediaType.VIDEO).length === 0 &&
+      this.player_.getStreams(MediaType.AUDIO).length === 0
+    ) {
       this.emitError_(
         ErrorCode.KEY_STATUS_RESTRICTED,
         new Error("No playable stream after key-status restrictions"),
       );
     }
-  }
-
-  private noPlayableStream_(restrictedKeyIds: Set<string>): boolean {
-    let anyType = false;
-    for (const type of [MediaType.VIDEO, MediaType.AUDIO] as const) {
-      const streams = this.player_.getStreams(type);
-      if (streams.length === 0) {
-        continue;
-      }
-      anyType = true;
-      const allRestricted = streams.every((s) =>
-        isStreamRestricted(s, restrictedKeyIds),
-      );
-      if (!allRestricted) {
-        return false;
-      }
-    }
-    return anyType;
   }
 
   private emitError_(code: ErrorCode, cause: unknown, fatal = true) {

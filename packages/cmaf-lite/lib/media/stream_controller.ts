@@ -4,6 +4,7 @@ import type {
   BufferFlushedEvent,
   ManifestUpdatedEvent,
   MediaAttachedEvent,
+  StreamsUpdatingEvent,
 } from "../events";
 import { Events } from "../events";
 import type { NetworkRequest } from "../net/network_request";
@@ -38,6 +39,7 @@ export class StreamController {
   private rangeStart_ = 0;
   private rangeEnd_ = 0;
   private streams_ = new Map<MediaType, Stream[]>();
+  private restrictedKeyIds_ = new Set<string>();
   private keySystemAccess_: MediaKeySystemAccess | null = null;
   private activeStream_ = new Map<MediaType, Stream>();
   private media_: HTMLMediaElement | null = null;
@@ -49,12 +51,18 @@ export class StreamController {
     this.player_.on(Events.MEDIA_DETACHED, this.onMediaDetached_);
     this.player_.on(Events.BUFFER_FLUSHED, this.onBufferFlushed_);
     this.player_.on(Events.ABR_ADAPT, this.onAbrAdapt_);
-    this.player_.on(Events.RESTRICTIONS_UPDATED, this.onRestrictionsUpdated_);
+    this.player_.on(Events.STREAMS_UPDATING, this.onStreamsUpdating_);
   }
 
   getStreams<T extends MediaType>(type: T) {
     const list = this.streams_.get(type);
-    return list as Stream<T>[] | null;
+    if (!list) {
+      return null;
+    }
+    // The playable set: streams whose key is not restricted by key status.
+    return list.filter(
+      (s) => !StreamUtils.isStreamRestricted(s, this.restrictedKeyIds_),
+    ) as Stream<T>[];
   }
 
   getKeySystemAccess() {
@@ -83,7 +91,7 @@ export class StreamController {
     this.player_.off(Events.MEDIA_DETACHED, this.onMediaDetached_);
     this.player_.off(Events.BUFFER_FLUSHED, this.onBufferFlushed_);
     this.player_.off(Events.ABR_ADAPT, this.onAbrAdapt_);
-    this.player_.off(Events.RESTRICTIONS_UPDATED, this.onRestrictionsUpdated_);
+    this.player_.off(Events.STREAMS_UPDATING, this.onStreamsUpdating_);
     this.mediaStates_.clear();
   }
 
@@ -106,7 +114,7 @@ export class StreamController {
         selection,
       );
       log.info("Streams", this.streams_);
-      this.player_.emit(Events.STREAMS_CREATED);
+      this.player_.emit(Events.STREAMS_UPDATED);
       this.tryStart_();
     }
   };
@@ -129,26 +137,28 @@ export class StreamController {
     this.switchStream_(event.stream);
   };
 
-  private onRestrictionsUpdated_ = () => {
-    const restricted = this.player_.getRestrictedKeyIds();
-    if (restricted.size === 0) {
-      return;
-    }
-    for (const [type, streams] of this.streams_) {
+  private onStreamsUpdating_ = (event: StreamsUpdatingEvent) => {
+    // Apply the new restriction set, switch any now-unplayable active stream
+    // to the first playable one of its type, then announce the changed
+    // playable set so ABR and others re-evaluate.
+    this.restrictedKeyIds_ = event.restrictedKeyIds;
+    for (const type of this.streams_.keys()) {
       if (type === MediaType.SUBTITLE) {
         continue;
       }
       const active = this.getActiveStream(type);
-      if (!active || !StreamUtils.isStreamRestricted(active, restricted)) {
+      if (
+        !active ||
+        !StreamUtils.isStreamRestricted(active, this.restrictedKeyIds_)
+      ) {
         continue;
       }
-      const replacement = streams.find(
-        (s) => !StreamUtils.isStreamRestricted(s, restricted),
-      );
+      const replacement = this.getStreams(type)?.[0];
       if (replacement) {
         this.switchStream_(replacement);
       }
     }
+    this.player_.emit(Events.STREAMS_UPDATED);
   };
 
   private switchStream_(stream: Stream) {

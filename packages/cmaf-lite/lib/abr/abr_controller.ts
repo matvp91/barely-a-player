@@ -5,7 +5,6 @@ import type { VideoStream } from "../types/media";
 import { MediaType } from "../types/media";
 import { NetworkRequestType } from "../types/net";
 import { Log } from "../utils/log";
-import * as StreamUtils from "../utils/stream_utils";
 import { Timer } from "../utils/timer";
 import { ThroughputEstimator } from "./throughput_estimator";
 
@@ -27,18 +26,19 @@ export class AbrController {
     this.timer_ = new Timer(() => this.onEvaluate_());
 
     this.player_.on(Events.NETWORK_RESPONSE, this.onNetworkResponse_);
-    this.player_.on(Events.STREAMS_CREATED, this.onStreamsCreated_);
+    this.player_.on(Events.STREAMS_UPDATED, this.onStreamsUpdated_);
   }
 
   destroy() {
     this.timer_.stop();
     this.player_.off(Events.NETWORK_RESPONSE, this.onNetworkResponse_);
-    this.player_.off(Events.STREAMS_CREATED, this.onStreamsCreated_);
+    this.player_.off(Events.STREAMS_UPDATED, this.onStreamsUpdated_);
   }
 
-  private onStreamsCreated_ = () => {
-    // When we have streams, evaluate which may lead to a
-    // different default stream selection.
+  private onStreamsUpdated_ = () => {
+    // The playable stream set changed (initial build or a restriction
+    // change); re-evaluate against it. ABR is restriction-agnostic —
+    // getStreams already returns only playable streams.
     this.evaluate_();
   };
 
@@ -57,10 +57,7 @@ export class AbrController {
   }
 
   private onEvaluate_() {
-    const restricted = this.player_.getRestrictedKeyIds();
-    const streams = this.player_
-      .getStreams(MediaType.VIDEO)
-      .filter((s) => !StreamUtils.isStreamRestricted(s, restricted));
+    const streams = this.player_.getStreams(MediaType.VIDEO);
     if (streams.length === 0) {
       return;
     }

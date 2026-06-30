@@ -28,7 +28,6 @@ export class Player extends EventEmitter<EventMap> {
   // shared DEFAULT_CONFIG (which would leak settings across instances).
   private config_: PlayerConfig = structuredClone(DEFAULT_CONFIG);
   private media_: HTMLMediaElement | null = null;
-  private restrictedKeyIds_ = new Set<string>();
 
   private networkService_: NetworkService;
 
@@ -128,20 +127,6 @@ export class Player extends EventEmitter<EventMap> {
    */
   getStreams<T extends MediaType>(type: T) {
     return this.streamController_.getStreams(type) ?? EMPTY_ARRAY;
-  }
-
-  /**
-   * Normalized key IDs currently restricted by key status.
-   */
-  getRestrictedKeyIds() {
-    return this.restrictedKeyIds_;
-  }
-
-  /**
-   * Replaces the restricted key ID set (EmeController owns this).
-   */
-  setRestrictedKeyIds(keyIds: Set<string>) {
-    this.restrictedKeyIds_ = keyIds;
   }
 
   /**
