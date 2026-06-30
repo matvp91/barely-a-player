@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  PROP_DECODING_INFO,
-  PROP_HIERARCHY,
-} from "../../lib/constants";
-import { KeySystem } from "../../lib/types/drm";
+import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../../lib/constants";
+import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
 import type {
   AudioStream,
   Preference,
@@ -495,7 +492,7 @@ describe("buildDecodingConfig", () => {
     expect(config.keySystemConfiguration.keySystem).toBe(KeySystem.WIDEVINE);
     expect(config.keySystemConfiguration.videoCapabilities![0]).toEqual({
       contentType: 'video/mp4; codecs="avc1.640028"',
-      robustness: "SW_SECURE_CRYPTO",
+      robustness: "SW_SECURE_DECODE",
     });
     expect(config.keySystemConfiguration.initDataTypes).toEqual(["cenc"]);
     expect(config.keySystemConfiguration.audioCapabilities).toBeUndefined();
@@ -518,6 +515,24 @@ describe("buildDecodingConfig", () => {
       robustness: "SW_SECURE_CRYPTO",
     });
     expect(config.keySystemConfiguration.videoCapabilities).toBeUndefined();
+  });
+
+  it("includes the encryption scheme in capabilities when provided", () => {
+    const track = createVideoTrack({ bandwidth: 5_000_000 });
+    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
+    const config = buildDecodingConfig(
+      track,
+      switchingSet,
+      KeySystem.WIDEVINE,
+      EncryptionScheme.CBCS,
+    ) as MediaDecodingConfiguration & {
+      keySystemConfiguration: MediaKeySystemConfiguration & {
+        videoCapabilities: { encryptionScheme?: string }[];
+      };
+    };
+    expect(
+      config.keySystemConfiguration.videoCapabilities[0]!.encryptionScheme,
+    ).toBe("cbcs");
   });
 });
 

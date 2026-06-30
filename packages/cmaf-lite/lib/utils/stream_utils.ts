@@ -1,5 +1,6 @@
 import type { DrmConfig, PlayerConfig } from "../config";
 import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../constants";
+import type { EncryptionScheme } from "../types/drm";
 import { KeySystem } from "../types/drm";
 import type { Manifest, SwitchingSet, Track } from "../types/manifest";
 import type {
@@ -175,10 +176,15 @@ type KeySystemProbeConfig = MediaKeySystemConfiguration & {
   keySystem: string;
 };
 
+type MediaCapabilityWithScheme = MediaKeySystemMediaCapability & {
+  encryptionScheme?: string;
+};
+
 export function buildDecodingConfig(
   track: Track,
   switchingSet: SwitchingSet,
   keySystem?: KeySystem,
+  encryptionScheme?: EncryptionScheme,
 ): MediaDecodingConfiguration {
   const contentType = CodecUtils.getContentType(track.type, switchingSet.codec);
   let base: MediaDecodingConfiguration;
@@ -213,10 +219,14 @@ export function buildDecodingConfig(
   }
 
   if (keySystem !== undefined) {
-    const cap: MediaKeySystemMediaCapability = {
-      contentType,
-      robustness: defaultRobustness(keySystem),
-    };
+    const robustness =
+      track.type === MediaType.VIDEO
+        ? defaultVideoRobustness(keySystem)
+        : defaultAudioRobustness(keySystem);
+    const cap: MediaCapabilityWithScheme = { contentType, robustness };
+    if (encryptionScheme) {
+      cap.encryptionScheme = encryptionScheme;
+    }
     const ksConfig: KeySystemProbeConfig = {
       keySystem,
       initDataTypes: ["cenc"],
@@ -239,7 +249,17 @@ export function buildDecodingConfig(
   return base;
 }
 
-function defaultRobustness(keySystem: KeySystem): string {
+function defaultVideoRobustness(keySystem: KeySystem): string {
+  if (keySystem === KeySystem.WIDEVINE) {
+    return "SW_SECURE_DECODE";
+  }
+  if (keySystem === KeySystem.PLAYREADY) {
+    return "150";
+  }
+  return "";
+}
+
+function defaultAudioRobustness(keySystem: KeySystem): string {
   if (keySystem === KeySystem.WIDEVINE) {
     return "SW_SECURE_CRYPTO";
   }
