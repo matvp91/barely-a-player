@@ -11,6 +11,7 @@ import {
   buildDecodingConfig,
   buildStreams,
   findStreamsMatchingPreferences,
+  isStreamRestricted,
   pickClosestByBandwidth,
   selectKeySystem,
 } from "../../lib/utils/stream_utils";
@@ -671,6 +672,48 @@ describe("selectKeySystem", () => {
       DEFAULT_CONFIG.drm,
     );
     expect(selection).toBeNull();
+  });
+});
+
+describe("isStreamRestricted", () => {
+  const videoStream = async (defaultKid: string) => {
+    mockMediaCapabilities(
+      createDecodingInfo({
+        keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+      }),
+    );
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({
+          protection: createProtection({ defaultKid }),
+        }),
+      ],
+    });
+    const selection = {
+      keySystem: KeySystem.WIDEVINE,
+      access: createKeySystemAccess(KeySystem.WIDEVINE),
+    };
+    const list =
+      (await buildStreams(manifest, DEFAULT_CONFIG, selection)).get(
+        MediaType.VIDEO,
+      ) ?? [];
+    return list[0]!;
+  };
+
+  it("is true when the stream's default_KID is restricted (dash-insensitive)", async () => {
+    const stream = await videoStream("abcdef01-2345-6789-abcd-ef0123456789");
+    const restricted = new Set(["abcdef0123456789abcdef0123456789"]);
+    expect(isStreamRestricted(stream, restricted)).toBe(true);
+  });
+
+  it("is false when the key ID is not restricted", async () => {
+    const stream = await videoStream("abcdef01-2345-6789-abcd-ef0123456789");
+    expect(isStreamRestricted(stream, new Set(["00"]))).toBe(false);
+  });
+
+  it("is false for an empty restricted set", async () => {
+    const stream = await videoStream("abcdef01-2345-6789-abcd-ef0123456789");
+    expect(isStreamRestricted(stream, new Set())).toBe(false);
   });
 });
 

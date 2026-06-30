@@ -1,5 +1,6 @@
 import type { DrmConfig, PlayerConfig } from "../config";
 import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../constants";
+import { normalizeKeyId } from "../drm/drm_utils";
 import type { EncryptionScheme } from "../types/drm";
 import { KeySystem } from "../types/drm";
 import type {
@@ -406,6 +407,25 @@ function defaultAudioRobustness(keySystem: KeySystem): string {
     return "150";
   }
   return "";
+}
+
+/**
+ * True when a stream's switching set is protected by a key ID present in
+ * the restricted set (e.g. `output-restricted` / `internal-error`). Clear
+ * and subtitle streams are never restricted.
+ */
+export function isStreamRestricted(
+  stream: Stream,
+  restrictedKeyIds: Set<string>,
+): boolean {
+  if (restrictedKeyIds.size === 0 || stream.type === MediaType.SUBTITLE) {
+    return false;
+  }
+  const protection = stream[PROP_HIERARCHY].switchingSet.protection;
+  if (!protection) {
+    return false;
+  }
+  return restrictedKeyIds.has(normalizeKeyId(protection.defaultKid));
 }
 
 export function pickClosestByBandwidth(
