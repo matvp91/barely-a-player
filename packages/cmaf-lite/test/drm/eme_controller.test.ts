@@ -3,6 +3,7 @@ import { PROP_DECODING_INFO } from "../../lib/constants";
 import { Events } from "../../lib/events";
 import { Player } from "../../lib/player";
 import { KeySystem } from "../../lib/types/drm";
+import { ErrorCode } from "../../lib/types/error";
 import { MediaType } from "../../lib/types/media";
 import {
   createFakeKeySystemAccess,
@@ -138,6 +139,25 @@ describe("EmeController", () => {
     await vi.waitFor(() => expect(created).toHaveBeenCalledOnce());
     expect(created.mock.calls[0]![0]).toMatchObject({
       keySystem: KeySystem.WIDEVINE,
+    });
+  });
+
+  it("emits a fatal ERROR when no license URL is configured", async () => {
+    const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
+    const onError = vi.fn();
+    player.on(Events.ERROR, onError);
+    const media = new FakeMediaElement();
+    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.MEDIA_ATTACHED, {
+      media: media as unknown as HTMLMediaElement,
+      mediaSource: {} as MediaSource,
+    });
+    await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
+    mediaKeys.sessions[0]!.emitMessage(new Uint8Array([1]));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalled());
+    expect(onError.mock.calls[0]![0]).toMatchObject({
+      code: ErrorCode.LICENSE_REQUEST_FAILED,
+      fatal: true,
     });
   });
 

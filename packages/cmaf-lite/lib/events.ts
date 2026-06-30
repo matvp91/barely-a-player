@@ -11,6 +11,7 @@ import type {
   VideoStream,
 } from ".";
 import type { KeySystem } from "./types/drm";
+import type { PlayerError } from "./types/error";
 
 /**
  * Event name constants emitted by the {@link Player}.
@@ -39,6 +40,7 @@ export const Events = {
   NETWORK_RESPONSE: "networkResponse",
   KEY_SESSION_CREATED: "keySessionCreated",
   KEY_STATUSES_CHANGED: "keyStatusesChanged",
+  ERROR: "error",
 } as const;
 
 /**
@@ -242,4 +244,5 @@ export interface EventMap {
   [Events.NETWORK_RESPONSE]: (event: NetworkResponseEvent) => void;
   [Events.KEY_SESSION_CREATED]: (event: KeySessionCreatedEvent) => void;
   [Events.KEY_STATUSES_CHANGED]: (event: KeyStatusesChangedEvent) => void;
+  [Events.ERROR]: (event: PlayerError) => void;
 }

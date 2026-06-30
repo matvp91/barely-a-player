@@ -5,6 +5,7 @@ export * from "./net/network_response";
 export * from "./net/network_service";
 export { Player } from "./player";
 export * from "./types/drm";
+export * from "./types/error";
 export * from "./types/helpers";
 export * from "./types/manifest";
 export * from "./types/media";

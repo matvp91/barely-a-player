@@ -4,6 +4,8 @@ import { Events } from "../events";
 import type { NetworkRequest } from "../net/network_request";
 import type { Player } from "../player";
 import { KeySystem } from "../types/drm";
+import type { PlayerError } from "../types/error";
+import { ErrorCode } from "../types/error";
 import { MediaType } from "../types/media";
 import { ABORTED, NetworkRequestType } from "../types/net";
 import * as BufferUtils from "../utils/buffer_utils";
@@ -100,7 +102,7 @@ export class EmeController {
         await this.createManifestSessions_(manager);
       }
     } catch (err) {
-      this.emitError_(err);
+      this.emitError_(ErrorCode.MEDIA_KEYS_SETUP_FAILED, err);
     }
   }
 
@@ -131,7 +133,7 @@ export class EmeController {
         new Uint8Array(event.initData),
       );
     } catch (err) {
-      this.emitError_(err);
+      this.emitError_(ErrorCode.MEDIA_KEYS_SETUP_FAILED, err);
     }
   }
 
@@ -197,7 +199,7 @@ export class EmeController {
       }
       await manager.update(session, new Uint8Array(response.arrayBuffer));
     } catch (err) {
-      this.emitError_(err);
+      this.emitError_(ErrorCode.LICENSE_REQUEST_FAILED, err);
     }
   }
 
@@ -216,16 +218,19 @@ export class EmeController {
     });
     for (const status of statuses.values()) {
       if (status === "internal-error" || status === "output-restricted") {
-        this.emitError_(new Error(`Fatal key status: ${status}`));
+        this.emitError_(
+          ErrorCode.LICENSE_RESPONSE_REJECTED,
+          new Error(`Fatal key status: ${status}`),
+        );
         return;
       }
     }
   }
 
-  private emitError_(err: unknown) {
-    // Preserved Stage-1 behavior; replaced by Events.ERROR in Stage 2.
-    log.info("error", err);
-    console.error("[EmeController]", err);
+  private emitError_(code: ErrorCode, cause: unknown, fatal = true) {
+    log.info("error", code, cause);
+    const error: PlayerError = { code, fatal, cause };
+    this.player_.emit(Events.ERROR, error);
   }
 
   private teardown_() {
