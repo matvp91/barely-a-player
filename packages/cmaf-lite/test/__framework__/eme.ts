@@ -136,6 +136,14 @@ export function createFakeKeySystemAccess(
 export class FakeMediaElement extends EventTarget {
   mediaKeys: MediaKeys | null = null;
   setMediaKeysCalls: (MediaKeys | null)[] = [];
+  currentTime = 0;
+  paused = true;
+  ended = false;
+  readonly buffered: TimeRanges = {
+    length: 0,
+    start: () => 0,
+    end: () => 0,
+  } as unknown as TimeRanges;
 
   async setMediaKeys(mediaKeys: MediaKeys | null): Promise<void> {
     this.setMediaKeysCalls.push(mediaKeys);
