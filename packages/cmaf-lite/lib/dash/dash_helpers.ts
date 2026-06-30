@@ -215,7 +215,13 @@ export function resolveProtection(
 
     const value = XmlUtils.attr(node, "value", XmlUtils.parseString);
     const psshText = XmlUtils.text(XmlUtils.child(node, "cenc:pssh"));
-    keySystems[keySystem] = keySystemInfoFromRaw(keySystem, value, psshText);
+    const proText = XmlUtils.text(XmlUtils.child(node, "mspr:pro"));
+    keySystems[keySystem] = keySystemInfoFromRaw(
+      keySystem,
+      value,
+      psshText,
+      proText,
+    );
   }
 
   asserts.assertExists(scheme, "Missing scheme");

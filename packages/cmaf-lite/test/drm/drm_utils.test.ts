@@ -5,6 +5,7 @@ import {
   keySystemFromSchemeIdUri,
   keySystemInfoFromRaw,
   normalizeKeyId,
+  psshFromPlayReadyPro,
 } from "../../lib/drm/drm_utils";
 import { KeySystem } from "../../lib/types/drm";
 import {
@@ -51,6 +52,30 @@ describe("keySystemFromSchemeIdUri", () => {
   });
 });
 
+describe("psshFromPlayReadyPro", () => {
+  it("wraps a PlayReady Object in a v0 pssh box with correct byte layout", () => {
+    const pro = new Uint8Array([1, 2, 3]);
+    const box = psshFromPlayReadyPro(pro);
+    // Total size: 4 (size) + 4 ("pssh") + 4 (version+flags) + 16 (system id) + 4 (dataSize) + 3 (data) = 35
+    expect(box.length).toBe(35);
+    // Bytes 0..4: big-endian box size = 35
+    expect(Array.from(box.subarray(0, 4))).toEqual([0, 0, 0, 35]);
+    // Bytes 4..8: "pssh"
+    expect(Array.from(box.subarray(4, 8))).toEqual([0x70, 0x73, 0x73, 0x68]);
+    // Bytes 8..12: version 0 + flags 0
+    expect(Array.from(box.subarray(8, 12))).toEqual([0, 0, 0, 0]);
+    // Bytes 12..28: PlayReady system id
+    expect(Array.from(box.subarray(12, 28))).toEqual([
+      0x9a, 0x04, 0xf0, 0x79, 0x98, 0x40, 0x42, 0x86, 0xab, 0x92, 0xe6, 0x5b,
+      0xe0, 0x88, 0x5f, 0x95,
+    ]);
+    // Bytes 28..32: data size = 3
+    expect(Array.from(box.subarray(28, 32))).toEqual([0, 0, 0, 3]);
+    // Bytes 32..35: pro data
+    expect(Array.from(box.subarray(32, 35))).toEqual([1, 2, 3]);
+  });
+});
+
 describe("keySystemInfoFromRaw", () => {
   it("returns FairPlay contentId from the value attribute", () => {
     expect(
@@ -83,6 +108,40 @@ describe("keySystemInfoFromRaw", () => {
     expect(
       keySystemInfoFromRaw(KeySystem.WIDEVINE, undefined, undefined),
     ).toEqual({});
+  });
+
+  it("synthesizes a PlayReady PSSH from proText when psshText is absent", () => {
+    // "AQID" is base64 for [1, 2, 3]
+    const out = keySystemInfoFromRaw(
+      KeySystem.PLAYREADY,
+      undefined,
+      undefined,
+      "AQID",
+    );
+    expect(out.pssh).toBeInstanceOf(Uint8Array);
+    // Synthesized box starts after size (4 bytes) with "pssh"
+    expect(Array.from(out.pssh!.subarray(4, 8))).toEqual([
+      0x70, 0x73, 0x73, 0x68,
+    ]);
+    // Contains PlayReady system id at bytes 12..28
+    expect(Array.from(out.pssh!.subarray(12, 28))).toEqual([
+      0x9a, 0x04, 0xf0, 0x79, 0x98, 0x40, 0x42, 0x86, 0xab, 0x92, 0xe6, 0x5b,
+      0xe0, 0x88, 0x5f, 0x95,
+    ]);
+  });
+
+  it("uses cenc:pssh (psshText wins) when both psshText and proText are present for PlayReady", () => {
+    // psshText = base64 of [0xAA, 0xBB] → "qrs=" is not right; use btoa approach: [170, 187] → "qrs="
+    // "qrs=" decodes to [0xaa, 0xbb] — but let's use a clean known value: "AQIDBA==" = [1,2,3,4]
+    const out = keySystemInfoFromRaw(
+      KeySystem.PLAYREADY,
+      undefined,
+      "AQIDBA==",
+      "AQID",
+    );
+    expect(out.pssh).toBeInstanceOf(Uint8Array);
+    // Should be the raw psshText bytes [1, 2, 3, 4], NOT a synthesized box
+    expect(Array.from(out.pssh!)).toEqual([1, 2, 3, 4]);
   });
 });
 

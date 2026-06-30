@@ -9,6 +9,35 @@ const KEY_SYSTEM_BY_UUID: Record<string, KeySystem> = {
   "94ce86fb-07ff-4f43-adb8-93d2fa968ca2": KeySystem.FAIRPLAY,
 };
 
+const PLAYREADY_PSSH_SYSTEM_ID = new Uint8Array([
+  0x9a, 0x04, 0xf0, 0x79, 0x98, 0x40, 0x42, 0x86, 0xab, 0x92, 0xe6, 0x5b, 0xe0,
+  0x88, 0x5f, 0x95,
+]);
+
+/**
+ * Wraps a PlayReady Object (the bytes of `<mspr:pro>`) in a version-0
+ * `pssh` box so it can be used as EME init data, for manifests that carry
+ * `<mspr:pro>` instead of `<cenc:pssh>`.
+ */
+export function psshFromPlayReadyPro(pro: Uint8Array): Uint8Array {
+  const boxSize = 4 + 4 + 4 + 16 + 4 + pro.length;
+  const out = new Uint8Array(boxSize);
+  const view = new DataView(out.buffer);
+  let offset = 0;
+  view.setUint32(offset, boxSize);
+  offset += 4;
+  out.set([0x70, 0x73, 0x73, 0x68], offset); // "pssh"
+  offset += 4;
+  view.setUint32(offset, 0); // version 0 + flags 0
+  offset += 4;
+  out.set(PLAYREADY_PSSH_SYSTEM_ID, offset);
+  offset += 16;
+  view.setUint32(offset, pro.length);
+  offset += 4;
+  out.set(pro, offset);
+  return out;
+}
+
 /** True when any audio/video switching set carries protection. */
 export function hasProtectedContent(manifest: Manifest): boolean {
   return manifest.switchingSets.some(
@@ -38,13 +67,16 @@ export function keySystemFromSchemeIdUri(uri: string): KeySystem | null {
  * Builds a {@link KeySystemInfo} from the raw strings extracted from
  * a key-system `<ContentProtection>` element. FairPlay carries a
  * `skd://` content identifier (in `value=` or in a child); other key
- * systems carry a base64 PSSH blob inside `<cenc:pssh>`. Returns an
- * empty object when nothing usable is present.
+ * systems carry a base64 PSSH blob inside `<cenc:pssh>`. When no
+ * `<cenc:pssh>` is present but a PlayReady `<mspr:pro>` is, a v0 PSSH
+ * box is synthesized from it. Returns an empty object when nothing
+ * usable is present.
  */
 export function keySystemInfoFromRaw(
   keySystem: KeySystem,
   value: string | undefined,
   psshText: string | undefined,
+  proText?: string,
 ): KeySystemInfo {
   if (keySystem === KeySystem.FAIRPLAY) {
     if (value?.startsWith("skd://")) {
@@ -55,13 +87,15 @@ export function keySystemInfoFromRaw(
     }
     return {};
   }
-  if (!psshText) {
-    return {};
+  if (psshText) {
+    return { pssh: StringUtils.decodeBase64(psshText.trim()) };
   }
-  const trimmedPsshText = psshText.trim();
-  return {
-    pssh: StringUtils.decodeBase64(trimmedPsshText),
-  };
+  if (keySystem === KeySystem.PLAYREADY && proText) {
+    return {
+      pssh: psshFromPlayReadyPro(StringUtils.decodeBase64(proText.trim())),
+    };
+  }
+  return {};
 }
 
 /**

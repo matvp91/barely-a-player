@@ -719,6 +719,20 @@ describe("DashParser", () => {
         ),
       ).toThrow(/default_KID/);
     });
+
+    it("synthesizes a PlayReady PSSH from mspr:pro when cenc:pssh is absent", () => {
+      const manifest = DashParser.create(
+        loadFixture("dash-parser/vod-protected-playready-mspr-pro.mpd"),
+        sourceUrl,
+      );
+      const video = findVideo(manifest);
+      expect(
+        video.protection?.keySystems[KeySystem.PLAYREADY]?.pssh,
+      ).toBeInstanceOf(Uint8Array);
+      // It's a synthesized v0 pssh box: starts after the 4-byte size with "pssh".
+      const pssh = video.protection!.keySystems[KeySystem.PLAYREADY]!.pssh!;
+      expect(Array.from(pssh.subarray(4, 8))).toEqual([0x70, 0x73, 0x73, 0x68]);
+    });
   });
 
   describe("update — live reconciliation", () => {
