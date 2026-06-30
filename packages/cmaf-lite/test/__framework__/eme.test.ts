@@ -4,6 +4,7 @@ import {
   FakeMediaElement,
   FakeMediaKeys,
   FakeMediaKeySession,
+  FakeKeyStatusMap,
 } from "./eme";
 
 describe("FakeMediaKeySession", () => {
@@ -44,6 +45,13 @@ describe("FakeMediaKeySession", () => {
     });
     await Promise.resolve();
     expect(settled).toBe(false);
+
+    let closedSettled = false;
+    session.closed.then(() => {
+      closedSettled = true;
+    });
+    await Promise.resolve();
+    expect(closedSettled).toBe(false);
   });
 });
 
@@ -68,7 +76,7 @@ describe("createFakeKeySystemAccess", () => {
 });
 
 describe("FakeMediaElement", () => {
-  it("records setMediaKeys calls and dispatches encrypted events", () => {
+  it("records setMediaKeys calls and dispatches encrypted events", async () => {
     const media = new FakeMediaElement();
     let initDataType = "";
     media.addEventListener("encrypted", (e) => {
@@ -76,5 +84,26 @@ describe("FakeMediaElement", () => {
     });
     media.emitEncrypted("cenc", new Uint8Array([1]));
     expect(initDataType).toBe("cenc");
+
+    await media.setMediaKeys(null);
+    expect(media.setMediaKeysCalls).toHaveLength(1);
+  });
+});
+
+describe("FakeKeyStatusMap", () => {
+  it("forEach yields (status, keyId-bytes) with the key id as bytes", () => {
+    const map = new FakeKeyStatusMap();
+    map.set("00ff", "usable");
+    const seen: { status: MediaKeyStatus; keyId: number[] }[] = [];
+    map.forEach((status, keyId) => {
+      const bytes = keyId instanceof Uint8Array ? keyId : new Uint8Array(keyId as ArrayBuffer);
+      seen.push({
+        status,
+        keyId: Array.from(bytes),
+      });
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.status).toBe("usable");
+    expect(seen[0]!.keyId).toEqual([0, 255]);
   });
 });
