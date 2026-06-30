@@ -33,6 +33,7 @@ export class EmeController {
     this.player_.on(Events.STREAMS_CREATED, this.onStreamsCreated_);
     this.player_.on(Events.MEDIA_ATTACHED, this.onMediaAttached_);
     this.player_.on(Events.MEDIA_DETACHING, this.onMediaDetaching_);
+    this.player_.on(Events.MANIFEST_UPDATED, this.onManifestUpdated_);
   }
 
   destroy() {
@@ -40,6 +41,7 @@ export class EmeController {
     this.player_.off(Events.STREAMS_CREATED, this.onStreamsCreated_);
     this.player_.off(Events.MEDIA_ATTACHED, this.onMediaAttached_);
     this.player_.off(Events.MEDIA_DETACHING, this.onMediaDetaching_);
+    this.player_.off(Events.MANIFEST_UPDATED, this.onManifestUpdated_);
   }
 
   private onStreamsCreated_ = async () => {
@@ -53,6 +55,13 @@ export class EmeController {
 
   private onMediaDetaching_ = () => {
     this.teardown_();
+  };
+
+  private onManifestUpdated_ = async () => {
+    const manager = this.sessionManager_;
+    if (manager && manager.keySystem !== KeySystem.FAIRPLAY) {
+      await this.createManifestSessions_(manager);
+    }
   };
 
   private async maybeActivate_() {
@@ -99,6 +108,11 @@ export class EmeController {
           await manager.attach(this.media_);
         }
         await this.createManifestSessions_(manager);
+        if (!this.manifestHasPssh_(manager.keySystem)) {
+          // No manifest PSSH for this key system (e.g. only default_KID
+          // with in-band PSSH) — let the encrypted event drive sessions.
+          this.attachEncryptedListener_(manager);
+        }
       }
     } catch (err) {
       this.emitError_(ErrorCode.MEDIA_KEYS_SETUP_FAILED, err);
@@ -134,6 +148,16 @@ export class EmeController {
     } catch (err) {
       this.emitError_(ErrorCode.MEDIA_KEYS_SETUP_FAILED, err);
     }
+  }
+
+  private manifestHasPssh_(keySystem: KeySystem): boolean {
+    const manifest = this.player_.getManifest();
+    return manifest.switchingSets.some((ss) => {
+      if (ss.type !== MediaType.VIDEO && ss.type !== MediaType.AUDIO) {
+        return false;
+      }
+      return ss.protection?.keySystems[keySystem]?.pssh != null;
+    });
   }
 
   private async createManifestSessions_(manager: SessionManager) {

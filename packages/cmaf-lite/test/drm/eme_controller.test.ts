@@ -174,6 +174,58 @@ describe("EmeController", () => {
     );
   });
 
+  it("falls back to the encrypted event when manifest has no PSSH for the key system", async () => {
+    const mediaKeys = new FakeMediaKeys();
+    const player = new Player();
+    const access = createFakeKeySystemAccess(KeySystem.WIDEVINE, mediaKeys);
+    vi.spyOn(player, "getKeySystemAccess").mockReturnValue(access);
+    // Protected, but no pssh for Widevine (only default_KID in practice).
+    vi.spyOn(player, "getManifest").mockReturnValue(
+      createManifest({
+        switchingSets: [
+          createVideoSwitchingSet({
+            protection: createProtection({
+              keySystems: { [KeySystem.WIDEVINE]: {} },
+            }),
+          }),
+        ],
+      }),
+    );
+    const media = new FakeMediaElement();
+    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.MEDIA_ATTACHED, {
+      media: media as unknown as HTMLMediaElement,
+      mediaSource: {} as MediaSource,
+    });
+    // Eager attach happened, but no manifest session.
+    await vi.waitFor(() => expect(media.setMediaKeysCalls).toHaveLength(1));
+    expect(mediaKeys.sessions).toHaveLength(0);
+    // The encrypted event now creates the session.
+    media.emitEncrypted("cenc", new Uint8Array([5, 5]));
+    await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
+  });
+
+  it("creates sessions for new PSSH on manifest update (key rotation)", async () => {
+    const { player, mediaKeys, manifest } = protectedPlayer(KeySystem.WIDEVINE);
+    const media = new FakeMediaElement();
+    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.MEDIA_ATTACHED, {
+      media: media as unknown as HTMLMediaElement,
+      mediaSource: {} as MediaSource,
+    });
+    await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(1));
+    // Rotate: same switching set gains a new PSSH.
+    const ss = manifest.switchingSets[0] as Extract<
+      (typeof manifest.switchingSets)[number],
+      { protection?: unknown }
+    >;
+    ss.protection!.keySystems[KeySystem.WIDEVINE] = {
+      pssh: new Uint8Array([7, 7, 7]),
+    };
+    player.emit(Events.MANIFEST_UPDATED, { manifest, isUpdate: true });
+    await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(2));
+  });
+
   it("emits NO_SUPPORTED_KEY_SYSTEM for protected content with no usable key system", async () => {
     const player = new Player();
     vi.spyOn(player, "getKeySystemAccess").mockReturnValue(null);
