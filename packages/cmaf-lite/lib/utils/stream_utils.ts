@@ -2,26 +2,179 @@ import type { DrmConfig, PlayerConfig } from "../config";
 import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../constants";
 import type { EncryptionScheme } from "../types/drm";
 import { KeySystem } from "../types/drm";
-import type { Manifest, SwitchingSet, Track } from "../types/manifest";
 import type {
-  AudioStream,
-  Preference,
-  Stream,
-  VideoStream,
-} from "../types/media";
+  AudioSwitchingSet,
+  Manifest,
+  SwitchingSet,
+  Track,
+  VideoSwitchingSet,
+} from "../types/manifest";
+import type { Preference, Stream } from "../types/media";
 import { MediaType } from "../types/media";
 import * as asserts from "./asserts";
 import * as CodecUtils from "./codec_utils";
 import * as Functional from "./functional";
 
+/** A chosen key system and the access used to create its MediaKeys. */
+export interface KeySystemSelection {
+  keySystem: KeySystem;
+  access: MediaKeySystemAccess;
+}
+
+interface RepresentativeSet {
+  switchingSet: VideoSwitchingSet | AudioSwitchingSet;
+  track: Track;
+}
+
+/**
+ * Picks one key system for the whole presentation. Runs a single
+ * `decodingInfo` probe per candidate, combining a representative video
+ * and audio track under one `keySystemConfiguration`. Candidates are
+ * the configured `preferredKeySystems` that also appear in the
+ * manifest, in preference order; the first supported one wins.
+ * Returns `null` for clear content or when nothing is supported.
+ */
+export async function selectKeySystem(
+  manifest: Manifest,
+  drm: DrmConfig,
+): Promise<KeySystemSelection | null> {
+  const protectedSets = manifest.switchingSets.filter(
+    (ss): ss is VideoSwitchingSet | AudioSwitchingSet =>
+      (ss.type === MediaType.VIDEO || ss.type === MediaType.AUDIO) &&
+      ss.protection != null,
+  );
+  if (protectedSets.length === 0) {
+    return null;
+  }
+
+  const present = new Set<KeySystem>();
+  for (const ss of protectedSets) {
+    const { protection } = ss;
+    if (!protection) {
+      continue;
+    }
+    for (const ks of Object.keys(protection.keySystems)) {
+      present.add(ks as KeySystem);
+    }
+  }
+
+  const video = pickRepresentativeVideo(protectedSets);
+  const audio = pickRepresentativeAudio(protectedSets);
+
+  for (const keySystem of drm.preferredKeySystems) {
+    if (!present.has(keySystem)) {
+      continue;
+    }
+    const config = buildPresentationDecodingConfig(video, audio, keySystem);
+    const info = await navigator.mediaCapabilities.decodingInfo(config);
+    if (info.supported && info.keySystemAccess) {
+      return { keySystem, access: info.keySystemAccess };
+    }
+  }
+  return null;
+}
+
+function pickRepresentativeVideo(
+  sets: (VideoSwitchingSet | AudioSwitchingSet)[],
+): RepresentativeSet | null {
+  let best: RepresentativeSet | null = null;
+  for (const ss of sets) {
+    if (ss.type !== MediaType.VIDEO) {
+      continue;
+    }
+    for (const track of ss.tracks) {
+      if (!best || track.bandwidth > best.track.bandwidth) {
+        best = { switchingSet: ss, track };
+      }
+    }
+  }
+  return best;
+}
+
+function pickRepresentativeAudio(
+  sets: (VideoSwitchingSet | AudioSwitchingSet)[],
+): RepresentativeSet | null {
+  for (const ss of sets) {
+    if (ss.type === MediaType.AUDIO && ss.tracks[0]) {
+      return { switchingSet: ss, track: ss.tracks[0] };
+    }
+  }
+  return null;
+}
+
+function buildPresentationDecodingConfig(
+  video: RepresentativeSet | null,
+  audio: RepresentativeSet | null,
+  keySystem: KeySystem,
+): MediaDecodingConfiguration {
+  const ksConfig: KeySystemProbeConfig = {
+    keySystem,
+    initDataTypes: ["cenc"],
+    distinctiveIdentifier: "optional",
+    persistentState: "optional",
+    sessionTypes: ["temporary"],
+  };
+  const config: MediaDecodingConfiguration & {
+    keySystemConfiguration: KeySystemProbeConfig;
+  } = { type: "media-source", keySystemConfiguration: ksConfig };
+
+  if (video) {
+    const contentType = CodecUtils.getContentType(
+      MediaType.VIDEO,
+      video.switchingSet.codec,
+    );
+    const track = video.track as Track<MediaType.VIDEO>;
+    config.video = {
+      contentType,
+      width: track.width,
+      height: track.height,
+      bitrate: track.bandwidth,
+      framerate: track.frameRate ?? DEFAULT_VIDEO_FRAMERATE,
+    };
+    const cap: MediaCapabilityWithScheme = {
+      contentType,
+      robustness: defaultVideoRobustness(keySystem),
+    };
+    if (video.switchingSet.protection) {
+      cap.encryptionScheme = video.switchingSet.protection.scheme;
+    }
+    ksConfig.videoCapabilities = [cap];
+  }
+
+  if (audio) {
+    const contentType = CodecUtils.getContentType(
+      MediaType.AUDIO,
+      audio.switchingSet.codec,
+    );
+    const track = audio.track as Track<MediaType.AUDIO>;
+    config.audio = {
+      contentType,
+      bitrate: track.bandwidth,
+      channels: String(track.channels ?? DEFAULT_AUDIO_CHANNELS),
+      samplerate: track.sampleRate ?? DEFAULT_AUDIO_SAMPLERATE,
+    };
+    const cap: MediaCapabilityWithScheme = {
+      contentType,
+      robustness: defaultAudioRobustness(keySystem),
+    };
+    if (audio.switchingSet.protection) {
+      cap.encryptionScheme = audio.switchingSet.protection.scheme;
+    }
+    ksConfig.audioCapabilities = [cap];
+  }
+
+  return config;
+}
+
 export async function buildStreams(
   manifest: Manifest,
-  config: PlayerConfig,
+  _config: PlayerConfig,
+  selection?: KeySystemSelection | null,
 ): Promise<Map<MediaType, Stream[]>> {
   const promises: Promise<Stream | null>[] = [];
   for (const switchingSet of manifest.switchingSets) {
     for (const track of switchingSet.tracks) {
-      promises.push(buildStream(switchingSet, track, config));
+      promises.push(buildStream(switchingSet, track, selection ?? null));
     }
   }
 
@@ -79,7 +232,7 @@ function matchesPreference(stream: Stream, preference: Preference): boolean {
 async function buildStream(
   switchingSet: SwitchingSet,
   track: Track,
-  config: PlayerConfig,
+  selection: KeySystemSelection | null,
 ): Promise<Stream | null> {
   const codec = CodecUtils.getNormalizedCodec(switchingSet.codec);
 
@@ -95,7 +248,7 @@ async function buildStream(
     };
   }
 
-  const info = await probeTrack(track, switchingSet, config);
+  const info = await probeTrack(track, switchingSet, selection);
   if (!info.supported) {
     return null;
   }
@@ -127,45 +280,34 @@ async function buildStream(
 async function probeTrack(
   track: Track,
   switchingSet: SwitchingSet,
-  config: PlayerConfig,
+  selection: KeySystemSelection | null,
 ): Promise<MediaCapabilitiesDecodingInfo> {
-  const candidates = candidateKeySystems(switchingSet, config.drm);
-  if (candidates.length === 0) {
+  const protection =
+    switchingSet.type === MediaType.SUBTITLE ? null : switchingSet.protection;
+
+  if (!protection) {
     return navigator.mediaCapabilities.decodingInfo(
       buildDecodingConfig(track, switchingSet),
     );
   }
-  let last: MediaCapabilitiesDecodingInfo | null = null;
-  for (const keySystem of candidates) {
-    const info = await navigator.mediaCapabilities.decodingInfo(
-      buildDecodingConfig(track, switchingSet, keySystem),
-    );
-    if (info.supported) {
-      return info;
-    }
-    last = info;
-  }
-  return (
-    last ?? {
+  if (!selection) {
+    // Protected, but no key system was selected for the presentation —
+    // the track cannot be decrypted, so drop it.
+    return {
       supported: false,
       smooth: false,
       powerEfficient: false,
       keySystemAccess: null,
-    }
-  );
-}
-
-function candidateKeySystems(
-  switchingSet: SwitchingSet,
-  drm: DrmConfig,
-): KeySystem[] {
-  if (
-    switchingSet.type === MediaType.AUDIO ||
-    switchingSet.type === MediaType.VIDEO
-  ) {
-    return [...drm.preferredKeySystems];
+    };
   }
-  return [];
+  return navigator.mediaCapabilities.decodingInfo(
+    buildDecodingConfig(
+      track,
+      switchingSet,
+      selection.keySystem,
+      protection.scheme,
+    ),
+  );
 }
 
 const DEFAULT_VIDEO_FRAMERATE = 30;

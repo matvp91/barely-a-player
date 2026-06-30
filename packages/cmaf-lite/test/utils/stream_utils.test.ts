@@ -12,6 +12,7 @@ import {
   buildStreams,
   findStreamsMatchingPreferences,
   pickClosestByBandwidth,
+  selectKeySystem,
 } from "../../lib/utils/stream_utils";
 import {
   createAudioSwitchingSet,
@@ -536,47 +537,29 @@ describe("buildDecodingConfig", () => {
   });
 });
 
-describe("buildStreams (protected)", () => {
-  it("returns the first key system that probes supported, in preferredKeySystems order", async () => {
-    const spy = mockMediaCapabilities();
-    spy.mockImplementation(async (cfg: MediaDecodingConfiguration) => {
-      const ks = (
-        cfg as MediaDecodingConfiguration & {
-          keySystemConfiguration?: MediaKeySystemConfiguration;
-        }
-      ).keySystemConfiguration;
-      const robustness = ks?.videoCapabilities?.[0]?.robustness;
-      if (robustness === "SW_SECURE_CRYPTO") {
-        return createDecodingInfo({
-          keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
-        });
-      }
-      return createDecodingInfo({ supported: false, keySystemAccess: null });
-    });
-
-    const manifest = createManifest({
+describe("selectKeySystem", () => {
+  const protectedManifest = (keySystems: Record<string, unknown>) =>
+    createManifest({
       switchingSets: [
         createVideoSwitchingSet({
-          protection: createProtection({
-            keySystems: {
-              [KeySystem.FAIRPLAY]: { contentId: "skd://x" },
-              [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
-            },
-          }),
+          protection: createProtection({ keySystems: keySystems as never }),
+        }),
+        createAudioSwitchingSet({
+          protection: createProtection({ keySystems: keySystems as never }),
         }),
       ],
     });
-    const list =
-      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
-    expect(list).toHaveLength(1);
-    const video = list[0] as VideoStream;
-    expect(video[PROP_DECODING_INFO].keySystemAccess?.keySystem).toBe(
-      KeySystem.WIDEVINE,
+
+  it("returns null for clear content", async () => {
+    mockMediaCapabilities();
+    const selection = await selectKeySystem(
+      createManifest(),
+      DEFAULT_CONFIG.drm,
     );
-    expect(spy).toHaveBeenCalledTimes(2);
+    expect(selection).toBeNull();
   });
 
-  it("probes configured key systems even when manifest protection lists different ones", async () => {
+  it("picks the first preferred key system present in the manifest that probes supported", async () => {
     const spy = mockMediaCapabilities();
     spy.mockImplementation(async (cfg: MediaDecodingConfiguration) => {
       const ks = (
@@ -592,42 +575,107 @@ describe("buildStreams (protected)", () => {
       return createDecodingInfo({ supported: false, keySystemAccess: null });
     });
 
-    const manifest = createManifest({
-      switchingSets: [
-        createVideoSwitchingSet({
-          protection: createProtection({
-            keySystems: {
-              [KeySystem.PLAYREADY]: {},
-            },
-          }),
-        }),
-      ],
-    });
-
-    const config = {
-      ...DEFAULT_CONFIG,
-      drm: { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
-    };
-    const list =
-      (await buildStreams(manifest, config)).get(MediaType.VIDEO) ?? [];
-    expect(list).toHaveLength(1);
-    const video = list[0] as VideoStream;
-    expect(video[PROP_DECODING_INFO].keySystemAccess?.keySystem).toBe(
-      KeySystem.WIDEVINE,
+    const selection = await selectKeySystem(
+      protectedManifest({
+        [KeySystem.FAIRPLAY]: { contentId: "skd://x" },
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
     );
+    expect(selection?.keySystem).toBe(KeySystem.WIDEVINE);
+    expect(selection?.access.keySystem).toBe(KeySystem.WIDEVINE);
   });
 
-  it("drops streams when no preferred key system is supported", async () => {
+  it("probes a single config carrying both video and audio capabilities", async () => {
+    const spy = mockMediaCapabilities(
+      createDecodingInfo({
+        keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+      }),
+    );
+    await selectKeySystem(
+      protectedManifest({
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
+    );
+    const cfg = spy.mock.calls[0]![0] as MediaDecodingConfiguration & {
+      keySystemConfiguration: MediaKeySystemConfiguration;
+    };
+    expect(cfg.keySystemConfiguration.videoCapabilities).toHaveLength(1);
+    expect(cfg.keySystemConfiguration.audioCapabilities).toHaveLength(1);
+  });
+
+  it("skips key systems not present in the manifest", async () => {
+    const spy = mockMediaCapabilities(
+      createDecodingInfo({
+        keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+      }),
+    );
+    await selectKeySystem(
+      protectedManifest({
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      {
+        ...DEFAULT_CONFIG.drm,
+        preferredKeySystems: [KeySystem.PLAYREADY, KeySystem.WIDEVINE],
+      },
+    );
+    // PlayReady absent from manifest → only Widevine probed.
+    expect(spy).toHaveBeenCalledTimes(1);
+    const cfg = spy.mock.calls[0]![0] as MediaDecodingConfiguration & {
+      keySystemConfiguration: { keySystem: string };
+    };
+    expect(cfg.keySystemConfiguration.keySystem).toBe(KeySystem.WIDEVINE);
+  });
+
+  it("returns null when no preferred key system probes supported", async () => {
     mockMediaCapabilities(
       createDecodingInfo({ supported: false, keySystemAccess: null }),
+    );
+    const selection = await selectKeySystem(
+      protectedManifest({
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      DEFAULT_CONFIG.drm,
+    );
+    expect(selection).toBeNull();
+  });
+});
+
+describe("buildStreams (protected)", () => {
+  it("keeps protected streams when a key system is selected", async () => {
+    mockMediaCapabilities(
+      createDecodingInfo({
+        keySystemAccess: createKeySystemAccess(KeySystem.WIDEVINE),
+      }),
     );
     const manifest = createManifest({
       switchingSets: [
         createVideoSwitchingSet({ protection: createProtection() }),
       ],
     });
+    const selection = {
+      keySystem: KeySystem.WIDEVINE,
+      access: createKeySystemAccess(KeySystem.WIDEVINE),
+    };
     const list =
-      (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
+      (await buildStreams(manifest, DEFAULT_CONFIG, selection)).get(
+        MediaType.VIDEO,
+      ) ?? [];
+    expect(list).toHaveLength(1);
+  });
+
+  it("drops protected streams when no key system is selected", async () => {
+    mockMediaCapabilities();
+    const manifest = createManifest({
+      switchingSets: [
+        createVideoSwitchingSet({ protection: createProtection() }),
+      ],
+    });
+    const list =
+      (await buildStreams(manifest, DEFAULT_CONFIG, null)).get(
+        MediaType.VIDEO,
+      ) ?? [];
     expect(list).toHaveLength(0);
   });
 });
