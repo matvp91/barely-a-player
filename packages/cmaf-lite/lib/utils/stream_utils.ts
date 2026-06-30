@@ -4,6 +4,7 @@ import { KeySystem } from "../types/drm";
 import type {
   AudioSwitchingSet,
   Manifest,
+  Protection,
   SwitchingSet,
   Track,
   VideoSwitchingSet,
@@ -25,6 +26,11 @@ interface RepresentativeSet {
   track: Track;
 }
 
+/** A video or audio switching set that carries protection. */
+type ProtectedSwitchingSet = (VideoSwitchingSet | AudioSwitchingSet) & {
+  protection: Protection;
+};
+
 /**
  * Picks one key system for the whole presentation. Runs a single
  * `decodingInfo` probe per candidate, combining a representative video
@@ -38,7 +44,7 @@ export async function selectKeySystem(
   drm: DrmConfig,
 ): Promise<KeySystemSelection | null> {
   const protectedSets = manifest.switchingSets.filter(
-    (ss): ss is VideoSwitchingSet | AudioSwitchingSet =>
+    (ss): ss is ProtectedSwitchingSet =>
       (ss.type === MediaType.VIDEO || ss.type === MediaType.AUDIO) &&
       ss.protection != null,
   );
@@ -48,8 +54,7 @@ export async function selectKeySystem(
 
   const present = new Set<KeySystem>();
   for (const ss of protectedSets) {
-    // biome-ignore lint/style/noNonNullAssertion: filter above guarantees protection != null
-    for (const ks of Object.keys(ss.protection!.keySystems)) {
+    for (const ks of Object.keys(ss.protection.keySystems)) {
       present.add(ks as KeySystem);
     }
   }

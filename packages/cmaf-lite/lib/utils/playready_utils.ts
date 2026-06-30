@@ -1,3 +1,4 @@
+import * as BufferUtils from "./buffer_utils";
 import * as StringUtils from "./string_utils";
 
 /**
@@ -24,7 +25,7 @@ export function buildPlayReadyRequest(message: ArrayBuffer): {
     const xml = new TextDecoder("utf-16le").decode(message);
     const challenge = /<Challenge[^>]*>([^<]+)<\/Challenge>/.exec(xml);
     if (challenge && challenge[1] !== undefined) {
-      body = StringUtils.decodeBase64(challenge[1]).buffer as ArrayBuffer;
+      body = BufferUtils.toArrayBuffer(StringUtils.decodeBase64(challenge[1]));
     }
     if (xml.includes("PlayReadyKeyMessage")) {
       const headerRe =
