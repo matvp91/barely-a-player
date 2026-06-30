@@ -42,6 +42,10 @@ export class SessionManager {
     return this.access_.keySystem as KeySystem;
   }
 
+  get sessionCount(): number {
+    return this.sessions_.length;
+  }
+
   /** Creates MediaKeys and installs the server certificate if given. */
   async init(serverCertificate?: Uint8Array): Promise<void> {
     this.mediaKeys_ = await this.access_.createMediaKeys();

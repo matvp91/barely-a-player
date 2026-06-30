@@ -27,3 +27,34 @@ export function unwrapPlayReadyChallenge(buffer: ArrayBuffer): ArrayBuffer {
   }
   return out.buffer;
 }
+
+/**
+ * Builds the request headers for a PlayReady license POST. When the CDM
+ * message is the legacy `PlayReadyKeyMessage` SOAP envelope, copies its
+ * `<HttpHeader>` name/value pairs (notably `Content-Type` and
+ * `SOAPAction`). Otherwise defaults to `text/xml; charset=utf-8`, which is
+ * what modern `com.microsoft.playready.recommendation` challenges expect.
+ *
+ * @public
+ */
+export function playReadyRequestHeaders(buffer: ArrayBuffer): Headers {
+  const headers = new Headers();
+  if (buffer.byteLength >= 2) {
+    const xml = new TextDecoder("utf-16le").decode(buffer);
+    if (xml.includes("PlayReadyKeyMessage")) {
+      const headerRe =
+        /<HttpHeader>\s*<name>([^<]+)<\/name>\s*<value>([^<]*)<\/value>\s*<\/HttpHeader>/g;
+      let match: RegExpExecArray | null;
+      // biome-ignore lint/suspicious/noAssignInExpressions: standard regex loop
+      while ((match = headerRe.exec(xml)) !== null) {
+        if (match[1] !== undefined && match[2] !== undefined) {
+          headers.set(match[1], match[2]);
+        }
+      }
+    }
+  }
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "text/xml; charset=utf-8");
+  }
+  return headers;
+}

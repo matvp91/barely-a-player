@@ -9,7 +9,10 @@ import { MediaType } from "../types/media";
 import { ABORTED, NetworkRequestType } from "../types/net";
 import * as BufferUtils from "../utils/buffer_utils";
 import { Log } from "../utils/log";
-import { unwrapPlayReadyChallenge } from "../utils/playready_utils";
+import {
+  playReadyRequestHeaders,
+  unwrapPlayReadyChallenge,
+} from "../utils/playready_utils";
 import { hasProtectedContent } from "./drm_utils";
 import { SessionManager } from "./session_manager";
 
@@ -193,10 +196,13 @@ export class EmeController {
     session: MediaKeySession,
     event: MediaKeyMessageEvent,
   ) {
+    let response: Awaited<NetworkRequest["promise"]>;
     try {
       let body: BodyInit = event.message;
+      let headers: Headers | undefined;
       if (manager.keySystem === KeySystem.PLAYREADY) {
         body = unwrapPlayReadyChallenge(event.message);
+        headers = playReadyRequestHeaders(event.message);
       }
       const url = this.player_.getConfig().drm.licenseUrls[manager.keySystem];
       if (!url) {
@@ -208,10 +214,9 @@ export class EmeController {
         .request(NetworkRequestType.LICENSE, url, undefined, {
           method: "POST",
           body,
+          headers,
         });
       this.licenseRequests_.add(request);
-
-      let response: Awaited<typeof request.promise>;
       try {
         response = await request.promise;
       } finally {
@@ -220,9 +225,21 @@ export class EmeController {
       if (response === ABORTED) {
         return;
       }
+    } catch (err) {
+      // Multi-key content survives one key's license failing; only fatal
+      // when it kills the sole session.
+      this.emitError_(
+        ErrorCode.LICENSE_REQUEST_FAILED,
+        err,
+        manager.sessionCount <= 1,
+      );
+      return;
+    }
+
+    try {
       await manager.update(session, new Uint8Array(response.arrayBuffer));
     } catch (err) {
-      this.emitError_(ErrorCode.LICENSE_REQUEST_FAILED, err);
+      this.emitError_(ErrorCode.LICENSE_RESPONSE_REJECTED, err, true);
     }
   }
 

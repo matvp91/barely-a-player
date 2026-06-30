@@ -9,6 +9,7 @@ import {
   FakeMediaKeys,
 } from "../__framework__/eme";
 import {
+  createAudioSwitchingSet,
   createManifest,
   createProtection,
   createVideoSwitchingSet,
@@ -248,6 +249,57 @@ describe("EmeController", () => {
     expect(onError.mock.calls[0]![0]).toMatchObject({
       code: ErrorCode.NO_SUPPORTED_KEY_SYSTEM,
       fatal: true,
+    });
+  });
+
+  it("treats a license failure as non-fatal when other sessions are active", async () => {
+    // Two PSSH entries → two sessions.
+    const mediaKeys = new FakeMediaKeys();
+    const player = new Player();
+    const access = createFakeKeySystemAccess(KeySystem.WIDEVINE, mediaKeys);
+    vi.spyOn(player, "getKeySystemAccess").mockReturnValue(access);
+    vi.spyOn(player, "getManifest").mockReturnValue(
+      createManifest({
+        switchingSets: [
+          createVideoSwitchingSet({
+            protection: createProtection({
+              keySystems: {
+                [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+              },
+            }),
+          }),
+          createAudioSwitchingSet({
+            protection: createProtection({
+              keySystems: {
+                [KeySystem.WIDEVINE]: { pssh: new Uint8Array([2]) },
+              },
+            }),
+          }),
+        ],
+      }),
+    );
+    player.setConfig("drm.licenseUrls", {
+      [KeySystem.WIDEVINE]: "https://lic.test",
+    });
+    const rejection = Promise.reject(new Error("network down"));
+    rejection.catch(() => {});
+    vi.spyOn(player.getNetworkService(), "request").mockReturnValue({
+      promise: rejection,
+    } as never);
+    const onError = vi.fn();
+    player.on(Events.ERROR, onError);
+    const media = new FakeMediaElement();
+    player.emit(Events.STREAMS_CREATED);
+    player.emit(Events.MEDIA_ATTACHED, {
+      media: media as unknown as HTMLMediaElement,
+      mediaSource: {} as MediaSource,
+    });
+    await vi.waitFor(() => expect(mediaKeys.sessions).toHaveLength(2));
+    mediaKeys.sessions[0]!.emitMessage(new Uint8Array([9]));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalled());
+    expect(onError.mock.calls[0]![0]).toMatchObject({
+      code: ErrorCode.LICENSE_REQUEST_FAILED,
+      fatal: false,
     });
   });
 });
