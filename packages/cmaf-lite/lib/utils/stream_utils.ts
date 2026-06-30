@@ -106,7 +106,7 @@ function buildPresentationDecodingConfig(
 ): MediaDecodingConfiguration {
   const ksConfig: MediaCapabilitiesKeySystemConfiguration = {
     keySystem,
-    initDataType: "cenc",
+    initDataType: initDataTypeForKeySystem(keySystem),
     distinctiveIdentifier: "optional",
     persistentState: "optional",
     sessionTypes: ["temporary"],
@@ -333,7 +333,7 @@ export function buildDecodingConfig(
   if (keySystem !== undefined) {
     const ksConfig: MediaCapabilitiesKeySystemConfiguration = {
       keySystem,
-      initDataType: "cenc",
+      initDataType: initDataTypeForKeySystem(keySystem),
       distinctiveIdentifier: "optional",
       persistentState: "optional",
       sessionTypes: ["temporary"],
@@ -373,6 +373,17 @@ function defaultAudioRobustness(keySystem: KeySystem): string {
     return "150";
   }
   return "";
+}
+
+/**
+ * EME Initialization Data Format for the probe (and sessions): the
+ * key-system init-data format, NOT the encryption scheme. Widevine and
+ * PlayReady carry a CENC PSSH box (`"cenc"`) for both cenc- and
+ * cbcs-encrypted content; FairPlay carries an `skd://` content id
+ * (`"skd"`).
+ */
+function initDataTypeForKeySystem(keySystem: KeySystem): string {
+  return keySystem === KeySystem.FAIRPLAY ? "skd" : "cenc";
 }
 
 /**

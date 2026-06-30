@@ -492,6 +492,13 @@ describe("buildDecodingConfig", () => {
     expect(config.video?.contentType).toBe('video/mp4; codecs="avc1.640028"');
   });
 
+  it("uses the skd init-data type for a FairPlay probe", () => {
+    const track = createVideoTrack({ bandwidth: 5_000_000 });
+    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
+    const config = buildDecodingConfig(track, switchingSet, KeySystem.FAIRPLAY);
+    expect(config.keySystemConfiguration?.initDataType).toBe("skd");
+  });
+
   it("uses audio KeySystemTrackConfiguration for an audio key system probe", () => {
     const track = createAudioTrack({ bandwidth: 128_000 });
     const switchingSet = createAudioSwitchingSet({ codec: "mp4a.40.2" });
