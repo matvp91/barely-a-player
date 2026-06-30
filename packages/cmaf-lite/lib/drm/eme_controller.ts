@@ -1,4 +1,4 @@
-import { PROP_KEY_SYSTEM_ACCESS } from "../constants";
+import { PROP_DECODING_INFO } from "../constants";
 import type { MediaAttachedEvent } from "../events";
 import { Events } from "../events";
 import type { Player } from "../player";
@@ -11,12 +11,6 @@ import { unwrapPlayReadyChallenge } from "../utils/playready_utils";
 
 const log = Log.create("EmeController");
 
-/**
- * Owns the MediaKeys lifecycle for protected presentations.
- * Dormant for clear content — when no stream carries
- * `PROP_KEY_SYSTEM_ACCESS`, no MediaKeys are created and no DOM
- * listeners are attached.
- */
 export class EmeController {
   private manifest_: Manifest | null = null;
   private media_: HTMLMediaElement | null = null;
@@ -78,9 +72,9 @@ export class EmeController {
     for (const type of [MediaType.VIDEO, MediaType.AUDIO] as const) {
       const streams = this.player_.getStreams(type);
       for (const stream of streams) {
-        const access = stream[PROP_KEY_SYSTEM_ACCESS];
-        if (access) {
-          return access;
+        const info = stream[PROP_DECODING_INFO];
+        if (info.keySystemAccess) {
+          return info.keySystemAccess;
         }
       }
     }

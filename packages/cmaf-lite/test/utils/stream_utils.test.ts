@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PROP_DECODING_INFO,
   PROP_HIERARCHY,
-  PROP_KEY_SYSTEM_ACCESS,
 } from "../../lib/constants";
 import { KeySystem } from "../../lib/types/drm";
 import type {
@@ -556,7 +555,9 @@ describe("buildStreams (protected)", () => {
       (await buildStreams(manifest, DEFAULT_CONFIG)).get(MediaType.VIDEO) ?? [];
     expect(list).toHaveLength(1);
     const video = list[0] as VideoStream;
-    expect(video[PROP_KEY_SYSTEM_ACCESS]?.keySystem).toBe(KeySystem.WIDEVINE);
+    expect(video[PROP_DECODING_INFO].keySystemAccess?.keySystem).toBe(
+      KeySystem.WIDEVINE,
+    );
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
@@ -596,7 +597,9 @@ describe("buildStreams (protected)", () => {
       (await buildStreams(manifest, config)).get(MediaType.VIDEO) ?? [];
     expect(list).toHaveLength(1);
     const video = list[0] as VideoStream;
-    expect(video[PROP_KEY_SYSTEM_ACCESS]?.keySystem).toBe(KeySystem.WIDEVINE);
+    expect(video[PROP_DECODING_INFO].keySystemAccess?.keySystem).toBe(
+      KeySystem.WIDEVINE,
+    );
   });
 
   it("drops streams when no preferred key system is supported", async () => {

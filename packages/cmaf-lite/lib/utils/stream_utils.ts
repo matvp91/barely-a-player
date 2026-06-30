@@ -1,9 +1,5 @@
 import type { DrmConfig, PlayerConfig } from "../config";
-import {
-  PROP_DECODING_INFO,
-  PROP_HIERARCHY,
-  PROP_KEY_SYSTEM_ACCESS,
-} from "../constants";
+import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../constants";
 import { KeySystem } from "../types/drm";
 import type { Manifest, SwitchingSet, Track } from "../types/manifest";
 import type {
@@ -104,7 +100,7 @@ async function buildStream(
   }
 
   if (track.type === MediaType.VIDEO && switchingSet.type === MediaType.VIDEO) {
-    const stream: VideoStream = {
+    return {
       type: MediaType.VIDEO,
       codec,
       bandwidth: track.bandwidth,
@@ -113,13 +109,9 @@ async function buildStream(
       [PROP_HIERARCHY]: { switchingSet, track },
       [PROP_DECODING_INFO]: info,
     };
-    if (info.keySystemAccess) {
-      stream[PROP_KEY_SYSTEM_ACCESS] = info.keySystemAccess;
-    }
-    return stream;
   }
   if (track.type === MediaType.AUDIO && switchingSet.type === MediaType.AUDIO) {
-    const stream: AudioStream = {
+    return {
       type: MediaType.AUDIO,
       codec,
       bandwidth: track.bandwidth,
@@ -127,10 +119,6 @@ async function buildStream(
       [PROP_HIERARCHY]: { switchingSet, track },
       [PROP_DECODING_INFO]: info,
     };
-    if (info.keySystemAccess) {
-      stream[PROP_KEY_SYSTEM_ACCESS] = info.keySystemAccess;
-    }
-    return stream;
   }
   throw new Error(`Failed to map track for type ${track.type}`);
 }
