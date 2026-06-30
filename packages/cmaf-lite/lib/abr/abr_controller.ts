@@ -5,6 +5,7 @@ import type { VideoStream } from "../types/media";
 import { MediaType } from "../types/media";
 import { NetworkRequestType } from "../types/net";
 import { Log } from "../utils/log";
+import * as StreamUtils from "../utils/stream_utils";
 import { Timer } from "../utils/timer";
 import { ThroughputEstimator } from "./throughput_estimator";
 
@@ -56,7 +57,10 @@ export class AbrController {
   }
 
   private onEvaluate_() {
-    const streams = this.player_.getStreams(MediaType.VIDEO);
+    const restricted = this.player_.getRestrictedKeyIds();
+    const streams = this.player_
+      .getStreams(MediaType.VIDEO)
+      .filter((s) => !StreamUtils.isStreamRestricted(s, restricted));
     if (streams.length === 0) {
       return;
     }

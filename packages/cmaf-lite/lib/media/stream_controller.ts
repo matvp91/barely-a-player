@@ -49,6 +49,7 @@ export class StreamController {
     this.player_.on(Events.MEDIA_DETACHED, this.onMediaDetached_);
     this.player_.on(Events.BUFFER_FLUSHED, this.onBufferFlushed_);
     this.player_.on(Events.ABR_ADAPT, this.onAbrAdapt_);
+    this.player_.on(Events.RESTRICTIONS_UPDATED, this.onRestrictionsUpdated_);
   }
 
   getStreams<T extends MediaType>(type: T) {
@@ -82,6 +83,7 @@ export class StreamController {
     this.player_.off(Events.MEDIA_DETACHED, this.onMediaDetached_);
     this.player_.off(Events.BUFFER_FLUSHED, this.onBufferFlushed_);
     this.player_.off(Events.ABR_ADAPT, this.onAbrAdapt_);
+    this.player_.off(Events.RESTRICTIONS_UPDATED, this.onRestrictionsUpdated_);
     this.mediaStates_.clear();
   }
 
@@ -125,6 +127,28 @@ export class StreamController {
 
   private onAbrAdapt_ = (event: AbrAdaptEvent) => {
     this.switchStream_(event.stream);
+  };
+
+  private onRestrictionsUpdated_ = () => {
+    const restricted = this.player_.getRestrictedKeyIds();
+    if (restricted.size === 0) {
+      return;
+    }
+    for (const [type, streams] of this.streams_) {
+      if (type === MediaType.SUBTITLE) {
+        continue;
+      }
+      const active = this.getActiveStream(type);
+      if (!active || !StreamUtils.isStreamRestricted(active, restricted)) {
+        continue;
+      }
+      const replacement = streams.find(
+        (s) => !StreamUtils.isStreamRestricted(s, restricted),
+      );
+      if (replacement) {
+        this.switchStream_(replacement);
+      }
+    }
   };
 
   private switchStream_(stream: Stream) {
