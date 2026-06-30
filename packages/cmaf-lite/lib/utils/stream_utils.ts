@@ -49,11 +49,8 @@ export async function selectKeySystem(
 
   const present = new Set<KeySystem>();
   for (const ss of protectedSets) {
-    const { protection } = ss;
-    if (!protection) {
-      continue;
-    }
-    for (const ks of Object.keys(protection.keySystems)) {
+    // biome-ignore lint/style/noNonNullAssertion: filter above guarantees protection != null
+    for (const ks of Object.keys(ss.protection!.keySystems)) {
       present.add(ks as KeySystem);
     }
   }

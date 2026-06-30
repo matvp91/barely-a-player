@@ -628,6 +628,38 @@ describe("selectKeySystem", () => {
     expect(cfg.keySystemConfiguration.keySystem).toBe(KeySystem.WIDEVINE);
   });
 
+  it("picks the first preferred key system when multiple are present and supported", async () => {
+    const spy = mockMediaCapabilities();
+    spy.mockImplementation(async (cfg: MediaDecodingConfiguration) => {
+      const ks = (
+        cfg as MediaDecodingConfiguration & {
+          keySystemConfiguration?: { keySystem?: string };
+        }
+      ).keySystemConfiguration?.keySystem;
+      // Both PlayReady and Widevine are supported.
+      if (ks === KeySystem.PLAYREADY || ks === KeySystem.WIDEVINE) {
+        return createDecodingInfo({
+          keySystemAccess: createKeySystemAccess(ks as KeySystem),
+        });
+      }
+      return createDecodingInfo({ supported: false, keySystemAccess: null });
+    });
+
+    const selection = await selectKeySystem(
+      protectedManifest({
+        [KeySystem.PLAYREADY]: { laUrl: "https://example.com" },
+        [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1]) },
+      }),
+      {
+        ...DEFAULT_CONFIG.drm,
+        preferredKeySystems: [KeySystem.PLAYREADY, KeySystem.WIDEVINE],
+      },
+    );
+    // PlayReady is first in preference order, so it wins even though both are supported.
+    expect(selection?.keySystem).toBe(KeySystem.PLAYREADY);
+    expect(selection?.access.keySystem).toBe(KeySystem.PLAYREADY);
+  });
+
   it("returns null when no preferred key system probes supported", async () => {
     mockMediaCapabilities(
       createDecodingInfo({ supported: false, keySystemAccess: null }),
