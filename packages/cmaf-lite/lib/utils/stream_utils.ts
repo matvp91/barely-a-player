@@ -102,13 +102,7 @@ function buildPresentationDecodingConfig(
   audio: RepresentativeSet | null,
   keySystem: KeySystem,
 ): MediaDecodingConfiguration {
-  const ksConfig: MediaCapabilitiesKeySystemConfiguration = {
-    keySystem,
-    initDataType: initDataTypeForKeySystem(keySystem),
-    distinctiveIdentifier: "optional",
-    persistentState: "optional",
-    sessionTypes: ["temporary"],
-  };
+  const ksConfig = buildKeySystemConfig(keySystem);
   const config: MediaDecodingConfiguration = {
     type: "media-source",
     keySystemConfiguration: ksConfig,
@@ -351,13 +345,7 @@ export function buildDecodingConfig(
   }
 
   if (keySystem !== undefined) {
-    const ksConfig: MediaCapabilitiesKeySystemConfiguration = {
-      keySystem,
-      initDataType: initDataTypeForKeySystem(keySystem),
-      distinctiveIdentifier: "optional",
-      persistentState: "optional",
-      sessionTypes: ["temporary"],
-    };
+    const ksConfig = buildKeySystemConfig(keySystem);
     const trackCfg: KeySystemTrackConfiguration = {
       robustness:
         track.type === MediaType.VIDEO
@@ -373,6 +361,22 @@ export function buildDecodingConfig(
   }
 
   return base;
+}
+
+/**
+ * Base EME `keySystemConfiguration` for a `decodingInfo` probe. Callers add
+ * per-track `video`/`audio` robustness.
+ */
+function buildKeySystemConfig(
+  keySystem: KeySystem,
+): MediaCapabilitiesKeySystemConfiguration {
+  return {
+    keySystem,
+    initDataType: initDataTypeForKeySystem(keySystem),
+    distinctiveIdentifier: "optional",
+    persistentState: "optional",
+    sessionTypes: ["temporary"],
+  };
 }
 
 function defaultVideoRobustness(keySystem: KeySystem): string {
