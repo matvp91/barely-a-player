@@ -14,10 +14,10 @@ import { MediaType } from "../types/media";
 import { ABORTED, NetworkRequestType } from "../types/net";
 import * as ArrayUtils from "../utils/array_utils";
 import * as asserts from "../utils/asserts";
-import * as BufferUtils from "../utils/buffer_utils";
 import { Log } from "../utils/log";
 import * as ManifestUtils from "../utils/manifest_utils";
 import * as StreamUtils from "../utils/stream_utils";
+import * as TimeRangesUtils from "../utils/time_ranges_utils";
 import { Timer } from "../utils/timer";
 
 const log = Log.create("StreamController");
@@ -391,7 +391,7 @@ export class StreamController {
   private getBufferEnd_(type: MediaType, time: number): number | null {
     const { maxBufferHole } = this.player_.getConfig();
     const buffered = this.player_.getBuffered(type);
-    return BufferUtils.getBufferedEnd(buffered, time, maxBufferHole);
+    return TimeRangesUtils.getBufferedEnd(buffered, time, maxBufferHole);
   }
 
   private getNextSegment_(
