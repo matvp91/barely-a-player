@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROP_DECODING_INFO } from "../../lib/constants";
 import { Events } from "../../lib/events";
 import { Player } from "../../lib/player";
@@ -126,7 +126,7 @@ describe("EmeController", () => {
   });
 
   it("emits KEY_SESSION_CREATED with the key system and session id", async () => {
-    const { player, mediaKeys } = protectedPlayer(KeySystem.WIDEVINE);
+    const { player } = protectedPlayer(KeySystem.WIDEVINE);
     const created = vi.fn();
     player.on(Events.KEY_SESSION_CREATED, created);
     const media = new FakeMediaElement();
@@ -156,5 +156,8 @@ describe("EmeController", () => {
     mediaKeys.sessions[0]!.emitKeyStatusesChange();
     expect(changed).toHaveBeenCalledOnce();
     expect(changed.mock.calls[0]![0].statuses.get("aa")).toBe("usable");
+    expect(changed.mock.calls[0]![0].sessionId).toBe(
+      mediaKeys.sessions[0]!.sessionId,
+    );
   });
 });
