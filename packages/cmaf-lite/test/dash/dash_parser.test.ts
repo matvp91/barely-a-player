@@ -670,8 +670,9 @@ describe("DashParser", () => {
         sourceUrl,
       );
       const video = findVideo(manifest);
+      // The MPD's dashed cenc:default_KID is normalized to dashless hex.
       expect(video.protection?.defaultKid).toBe(
-        "abcdef01-2345-6789-abcd-ef0123456789",
+        "abcdef0123456789abcdef0123456789",
       );
       expect(
         video.protection?.keySystems[KeySystem.WIDEVINE]?.pssh,

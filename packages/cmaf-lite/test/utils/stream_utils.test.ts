@@ -671,19 +671,19 @@ describe("isStreamRestricted", () => {
     return list[0]!;
   };
 
-  it("is true when the stream's default_KID is restricted (dash-insensitive)", async () => {
-    const stream = await videoStream("abcdef01-2345-6789-abcd-ef0123456789");
+  it("is true when the stream's default_KID is in the restricted set", async () => {
+    const stream = await videoStream("abcdef0123456789abcdef0123456789");
     const restricted = new Set(["abcdef0123456789abcdef0123456789"]);
     expect(isStreamRestricted(stream, restricted)).toBe(true);
   });
 
   it("is false when the key ID is not restricted", async () => {
-    const stream = await videoStream("abcdef01-2345-6789-abcd-ef0123456789");
+    const stream = await videoStream("abcdef0123456789abcdef0123456789");
     expect(isStreamRestricted(stream, new Set(["00"]))).toBe(false);
   });
 
   it("is false for an empty restricted set", async () => {
-    const stream = await videoStream("abcdef01-2345-6789-abcd-ef0123456789");
+    const stream = await videoStream("abcdef0123456789abcdef0123456789");
     expect(isStreamRestricted(stream, new Set())).toBe(false);
   });
 });

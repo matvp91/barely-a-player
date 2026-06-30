@@ -160,7 +160,7 @@ export function mockMediaCapabilities(
 
 export function createProtection(overrides?: Partial<Protection>): Protection {
   return {
-    defaultKid: "abcdef01-2345-6789-abcd-ef0123456789",
+    defaultKid: "abcdef0123456789abcdef0123456789",
     keySystems: {
       [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1, 2, 3, 4]) },
     },

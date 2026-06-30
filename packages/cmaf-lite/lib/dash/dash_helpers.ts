@@ -2,6 +2,7 @@ import type * as txml from "txml";
 import {
   keySystemFromSchemeIdUri,
   keySystemInfoFromRaw,
+  normalizeKeyId,
 } from "../drm/drm_utils";
 import type { KeySystem } from "../types/drm";
 import type {
@@ -196,7 +197,7 @@ export function resolveProtection(
     if (schemeIdUri === "urn:mpeg:dash:mp4protection:2011") {
       const kid = XmlUtils.attr(node, "cenc:default_KID", XmlUtils.parseString);
       if (kid) {
-        defaultKid = kid.toLowerCase();
+        defaultKid = normalizeKeyId(kid);
       }
       continue;
     }

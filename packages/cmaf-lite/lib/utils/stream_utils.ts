@@ -1,6 +1,5 @@
 import type { DrmConfig, PlayerConfig } from "../config";
 import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../constants";
-import { normalizeKeyId } from "../drm/drm_utils";
 import { KeySystem } from "../types/drm";
 import type {
   AudioSwitchingSet,
@@ -402,7 +401,7 @@ export function isStreamRestricted(
   if (!protection) {
     return false;
   }
-  return restrictedKeyIds.has(normalizeKeyId(protection.defaultKid));
+  return restrictedKeyIds.has(protection.defaultKid);
 }
 
 export function pickClosestByBandwidth(

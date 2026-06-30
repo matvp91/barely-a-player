@@ -33,8 +33,8 @@ const twoProtectedVideoManifest = () => {
 
   return createManifest({
     switchingSets: [
-      mkSet("aaaaaaaa-0000-0000-0000-000000000000", 1_000_000),
-      mkSet("bbbbbbbb-0000-0000-0000-000000000000", 2_000_000),
+      mkSet("aaaaaaaa000000000000000000000000", 1_000_000),
+      mkSet("bbbbbbbb000000000000000000000000", 2_000_000),
     ],
   });
 };
