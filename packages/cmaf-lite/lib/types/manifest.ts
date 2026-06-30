@@ -1,4 +1,4 @@
-import type { EncryptionScheme, KeySystem } from "./drm";
+import type { KeySystem } from "./drm";
 import type { MediaType } from "./media";
 
 /**
@@ -14,8 +14,6 @@ export const LANGUAGE_UNKNOWN = "unk";
  * @public
  */
 export interface Protection {
-  /** Encryption scheme. */
-  scheme: EncryptionScheme;
   /** Default Key ID. */
   defaultKid: string;
   /** Per-key-system init material. */

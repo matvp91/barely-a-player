@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../../lib/constants";
-import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
+import { KeySystem } from "../../lib/types/drm";
 import type {
   AudioStream,
   Preference,
@@ -482,59 +482,25 @@ describe("buildDecodingConfig", () => {
       bandwidth: 5_000_000,
     });
     const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
-    const config = buildDecodingConfig(
-      track,
-      switchingSet,
-      KeySystem.WIDEVINE,
-    ) as MediaDecodingConfiguration & {
-      keySystemConfiguration: MediaKeySystemConfiguration & {
-        keySystem: string;
-      };
-    };
-    expect(config.keySystemConfiguration.keySystem).toBe(KeySystem.WIDEVINE);
-    expect(config.keySystemConfiguration.videoCapabilities![0]).toEqual({
-      contentType: 'video/mp4; codecs="avc1.640028"',
+    const config = buildDecodingConfig(track, switchingSet, KeySystem.WIDEVINE);
+    expect(config.keySystemConfiguration?.keySystem).toBe(KeySystem.WIDEVINE);
+    expect(config.keySystemConfiguration?.initDataType).toBe("cenc");
+    expect(config.keySystemConfiguration?.video).toEqual({
       robustness: "SW_SECURE_DECODE",
     });
-    expect(config.keySystemConfiguration.initDataTypes).toEqual(["cenc"]);
-    expect(config.keySystemConfiguration.audioCapabilities).toBeUndefined();
+    expect(config.keySystemConfiguration?.audio).toBeUndefined();
+    expect(config.video?.contentType).toBe('video/mp4; codecs="avc1.640028"');
   });
 
-  it("uses audioCapabilities for an audio key system probe", () => {
+  it("uses audio KeySystemTrackConfiguration for an audio key system probe", () => {
     const track = createAudioTrack({ bandwidth: 128_000 });
     const switchingSet = createAudioSwitchingSet({ codec: "mp4a.40.2" });
-    const config = buildDecodingConfig(
-      track,
-      switchingSet,
-      KeySystem.WIDEVINE,
-    ) as MediaDecodingConfiguration & {
-      keySystemConfiguration: MediaKeySystemConfiguration & {
-        keySystem: string;
-      };
-    };
-    expect(config.keySystemConfiguration.audioCapabilities![0]).toEqual({
-      contentType: 'audio/mp4; codecs="mp4a.40.2"',
+    const config = buildDecodingConfig(track, switchingSet, KeySystem.WIDEVINE);
+    expect(config.keySystemConfiguration?.audio).toEqual({
       robustness: "SW_SECURE_CRYPTO",
     });
-    expect(config.keySystemConfiguration.videoCapabilities).toBeUndefined();
-  });
-
-  it("includes the encryption scheme in capabilities when provided", () => {
-    const track = createVideoTrack({ bandwidth: 5_000_000 });
-    const switchingSet = createVideoSwitchingSet({ codec: "avc1.640028" });
-    const config = buildDecodingConfig(
-      track,
-      switchingSet,
-      KeySystem.WIDEVINE,
-      EncryptionScheme.CBCS,
-    ) as MediaDecodingConfiguration & {
-      keySystemConfiguration: MediaKeySystemConfiguration & {
-        videoCapabilities: { encryptionScheme?: string }[];
-      };
-    };
-    expect(
-      config.keySystemConfiguration.videoCapabilities[0]!.encryptionScheme,
-    ).toBe("cbcs");
+    expect(config.keySystemConfiguration?.video).toBeUndefined();
+    expect(config.audio?.contentType).toBe('audio/mp4; codecs="mp4a.40.2"');
   });
 });
 
@@ -599,11 +565,9 @@ describe("selectKeySystem", () => {
       }),
       { ...DEFAULT_CONFIG.drm, preferredKeySystems: [KeySystem.WIDEVINE] },
     );
-    const cfg = spy.mock.calls[0]![0] as MediaDecodingConfiguration & {
-      keySystemConfiguration: MediaKeySystemConfiguration;
-    };
-    expect(cfg.keySystemConfiguration.videoCapabilities).toHaveLength(1);
-    expect(cfg.keySystemConfiguration.audioCapabilities).toHaveLength(1);
+    const cfg = spy.mock.calls[0]![0];
+    expect(cfg.keySystemConfiguration?.video).toBeDefined();
+    expect(cfg.keySystemConfiguration?.audio).toBeDefined();
   });
 
   it("skips key systems not present in the manifest", async () => {

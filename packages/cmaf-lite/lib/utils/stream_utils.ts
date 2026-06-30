@@ -1,7 +1,6 @@
 import type { DrmConfig, PlayerConfig } from "../config";
 import { PROP_DECODING_INFO, PROP_HIERARCHY } from "../constants";
 import { normalizeKeyId } from "../drm/drm_utils";
-import type { EncryptionScheme } from "../types/drm";
 import { KeySystem } from "../types/drm";
 import type {
   AudioSwitchingSet,
@@ -105,16 +104,17 @@ function buildPresentationDecodingConfig(
   audio: RepresentativeSet | null,
   keySystem: KeySystem,
 ): MediaDecodingConfiguration {
-  const ksConfig: KeySystemProbeConfig = {
+  const ksConfig: MediaCapabilitiesKeySystemConfiguration = {
     keySystem,
-    initDataTypes: ["cenc"],
+    initDataType: "cenc",
     distinctiveIdentifier: "optional",
     persistentState: "optional",
     sessionTypes: ["temporary"],
   };
-  const config: MediaDecodingConfiguration & {
-    keySystemConfiguration: KeySystemProbeConfig;
-  } = { type: "media-source", keySystemConfiguration: ksConfig };
+  const config: MediaDecodingConfiguration = {
+    type: "media-source",
+    keySystemConfiguration: ksConfig,
+  };
 
   if (video) {
     const contentType = CodecUtils.getContentType(
@@ -129,14 +129,7 @@ function buildPresentationDecodingConfig(
       bitrate: track.bandwidth,
       framerate: track.frameRate ?? DEFAULT_VIDEO_FRAMERATE,
     };
-    const cap: MediaCapabilityWithScheme = {
-      contentType,
-      robustness: defaultVideoRobustness(keySystem),
-    };
-    if (video.switchingSet.protection) {
-      cap.encryptionScheme = video.switchingSet.protection.scheme;
-    }
-    ksConfig.videoCapabilities = [cap];
+    ksConfig.video = { robustness: defaultVideoRobustness(keySystem) };
   }
 
   if (audio) {
@@ -151,14 +144,7 @@ function buildPresentationDecodingConfig(
       channels: String(track.channels ?? DEFAULT_AUDIO_CHANNELS),
       samplerate: track.sampleRate ?? DEFAULT_AUDIO_SAMPLERATE,
     };
-    const cap: MediaCapabilityWithScheme = {
-      contentType,
-      robustness: defaultAudioRobustness(keySystem),
-    };
-    if (audio.switchingSet.protection) {
-      cap.encryptionScheme = audio.switchingSet.protection.scheme;
-    }
-    ksConfig.audioCapabilities = [cap];
+    ksConfig.audio = { robustness: defaultAudioRobustness(keySystem) };
   }
 
   return config;
@@ -299,12 +285,7 @@ async function probeTrack(
     };
   }
   return navigator.mediaCapabilities.decodingInfo(
-    buildDecodingConfig(
-      track,
-      switchingSet,
-      selection.keySystem,
-      protection.scheme,
-    ),
+    buildDecodingConfig(track, switchingSet, selection.keySystem),
   );
 }
 
@@ -312,19 +293,10 @@ const DEFAULT_VIDEO_FRAMERATE = 30;
 const DEFAULT_AUDIO_CHANNELS = "2";
 const DEFAULT_AUDIO_SAMPLERATE = 48_000;
 
-type KeySystemProbeConfig = MediaKeySystemConfiguration & {
-  keySystem: string;
-};
-
-type MediaCapabilityWithScheme = MediaKeySystemMediaCapability & {
-  encryptionScheme?: string;
-};
-
 export function buildDecodingConfig(
   track: Track,
   switchingSet: SwitchingSet,
   keySystem?: KeySystem,
-  encryptionScheme?: EncryptionScheme,
 ): MediaDecodingConfiguration {
   const contentType = CodecUtils.getContentType(track.type, switchingSet.codec);
   let base: MediaDecodingConfiguration;
@@ -359,31 +331,25 @@ export function buildDecodingConfig(
   }
 
   if (keySystem !== undefined) {
-    const robustness =
-      track.type === MediaType.VIDEO
-        ? defaultVideoRobustness(keySystem)
-        : defaultAudioRobustness(keySystem);
-    const cap: MediaCapabilityWithScheme = { contentType, robustness };
-    if (encryptionScheme) {
-      cap.encryptionScheme = encryptionScheme;
-    }
-    const ksConfig: KeySystemProbeConfig = {
+    const ksConfig: MediaCapabilitiesKeySystemConfiguration = {
       keySystem,
-      initDataTypes: ["cenc"],
+      initDataType: "cenc",
       distinctiveIdentifier: "optional",
       persistentState: "optional",
       sessionTypes: ["temporary"],
     };
+    const trackCfg: KeySystemTrackConfiguration = {
+      robustness:
+        track.type === MediaType.VIDEO
+          ? defaultVideoRobustness(keySystem)
+          : defaultAudioRobustness(keySystem),
+    };
     if (track.type === MediaType.VIDEO) {
-      ksConfig.videoCapabilities = [cap];
+      ksConfig.video = trackCfg;
     } else {
-      ksConfig.audioCapabilities = [cap];
+      ksConfig.audio = trackCfg;
     }
-    (
-      base as MediaDecodingConfiguration & {
-        keySystemConfiguration: KeySystemProbeConfig;
-      }
-    ).keySystemConfiguration = ksConfig;
+    base.keySystemConfiguration = ksConfig;
   }
 
   return base;

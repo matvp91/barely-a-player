@@ -8,11 +8,3 @@ export enum KeySystem {
   PLAYREADY = "com.microsoft.playready.recommendation",
   FAIRPLAY = "com.apple.fps",
 }
-
-/**
- * @public
- */
-export enum EncryptionScheme {
-  CBCS = "cbcs",
-  CENC = "cenc",
-}

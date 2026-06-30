@@ -4,7 +4,6 @@ import {
   keySystemInfoFromRaw,
 } from "../drm/drm_utils";
 import type { KeySystem } from "../types/drm";
-import { EncryptionScheme } from "../types/drm";
 import type {
   KeySystemInfo,
   Protection,
@@ -180,7 +179,6 @@ export function resolveProtection(
     return undefined;
   }
 
-  let scheme: EncryptionScheme | null = null;
   let defaultKid: string | null = null;
   const keySystems: Partial<Record<KeySystem, KeySystemInfo>> = {};
 
@@ -194,13 +192,8 @@ export function resolveProtection(
       continue;
     }
 
-    // DASH scheme URN for the mp4protection element that carries scheme
-    // and default_KID.
+    // DASH scheme URN for the mp4protection element that carries default_KID.
     if (schemeIdUri === "urn:mpeg:dash:mp4protection:2011") {
-      const value = XmlUtils.attr(node, "value", XmlUtils.parseString);
-      if (value === EncryptionScheme.CENC || value === EncryptionScheme.CBCS) {
-        scheme = value;
-      }
       const kid = XmlUtils.attr(node, "cenc:default_KID", XmlUtils.parseString);
       if (kid) {
         defaultKid = kid.toLowerCase();
@@ -224,10 +217,9 @@ export function resolveProtection(
     );
   }
 
-  asserts.assertExists(scheme, "Missing scheme");
   asserts.assertExists(defaultKid, "Missing cenc:default_KID");
 
-  return { scheme, defaultKid, keySystems };
+  return { defaultKid, keySystems };
 }
 
 export function resolveChannelCount(node: txml.TNode): number | undefined {

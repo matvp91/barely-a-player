@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as DashParser from "../../lib/dash/dash_parser";
-import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
+import { KeySystem } from "../../lib/types/drm";
 import type { AudioTrack, VideoTrack } from "../../lib/types/manifest";
 import { MediaType } from "../../lib/types/media";
 import { loadFixture } from "../fixtures";
@@ -670,7 +670,6 @@ describe("DashParser", () => {
         sourceUrl,
       );
       const video = findVideo(manifest);
-      expect(video.protection?.scheme).toBe(EncryptionScheme.CENC);
       expect(video.protection?.defaultKid).toBe(
         "abcdef01-2345-6789-abcd-ef0123456789",
       );
@@ -693,19 +692,17 @@ describe("DashParser", () => {
         sourceUrl,
       );
       const video = findVideo(manifest);
-      expect(video.protection?.scheme).toBe(EncryptionScheme.CENC);
       expect(
         video.protection?.keySystems[KeySystem.WIDEVINE]?.pssh,
       ).toBeInstanceOf(Uint8Array);
     });
 
-    it("parses FairPlay contentId and cbcs scheme from the value attribute", () => {
+    it("parses FairPlay contentId from the value attribute", () => {
       const manifest = DashParser.create(
         loadFixture("dash-parser/vod-protected-fairplay.mpd"),
         sourceUrl,
       );
       const video = findVideo(manifest);
-      expect(video.protection?.scheme).toBe(EncryptionScheme.CBCS);
       expect(video.protection?.keySystems[KeySystem.FAIRPLAY]?.contentId).toBe(
         "skd://example/abc123",
       );

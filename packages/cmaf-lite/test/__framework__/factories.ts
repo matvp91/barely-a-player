@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import type { DrmConfig, PlayerConfig } from "../../lib/config";
 import { DEFAULT_CONFIG as LIB_DEFAULT_CONFIG } from "../../lib/config";
-import { EncryptionScheme, KeySystem } from "../../lib/types/drm";
+import { KeySystem } from "../../lib/types/drm";
 import type {
   InitSegment,
   Manifest,
@@ -160,7 +160,6 @@ export function mockMediaCapabilities(
 
 export function createProtection(overrides?: Partial<Protection>): Protection {
   return {
-    scheme: EncryptionScheme.CENC,
     defaultKid: "abcdef01-2345-6789-abcd-ef0123456789",
     keySystems: {
       [KeySystem.WIDEVINE]: { pssh: new Uint8Array([1, 2, 3, 4]) },
