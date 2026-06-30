@@ -153,6 +153,37 @@ describe("SessionManager", () => {
     expect(keys.sessions).toHaveLength(0);
   });
 
+  it("recreates a session from stored init data on hardware-context-reset", async () => {
+    const { keys, manager } = setup();
+    await manager.init();
+    await manager.createSession("cenc", new Uint8Array([1, 2]));
+    keys.sessions[0]!.emitClosed(
+      "hardware-context-reset" as MediaKeySessionClosedReason,
+    );
+    await vi.waitFor(() => expect(keys.sessions).toHaveLength(2));
+    expect(
+      Array.from(
+        new Uint8Array(keys.sessions[1]!.generateRequestArgs[0]!.initData),
+      ),
+    ).toEqual([1, 2]);
+  });
+
+  it("drops a session without recreating it on a non-recoverable close", async () => {
+    const { keys, manager } = setup();
+    await manager.init();
+    await manager.createSession("cenc", new Uint8Array([1, 2]));
+    keys.sessions[0]!.emitClosed(
+      "internal-error" as MediaKeySessionClosedReason,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(keys.sessions).toHaveLength(1);
+    // The dropped init data can be created again (no longer deduped).
+    const id = await manager.createSession("cenc", new Uint8Array([1, 2]));
+    expect(id).not.toBeNull();
+    expect(keys.sessions).toHaveLength(2);
+  });
+
   it("does not hang destroy when a session.close() never resolves", async () => {
     vi.useFakeTimers();
     try {

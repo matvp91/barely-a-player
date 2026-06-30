@@ -83,7 +83,8 @@ export class SessionManager {
     }
 
     const session = this.mediaKeys_.createSession("temporary");
-    this.sessions_.push({ session, initData, initDataType });
+    const entry: SessionEntry = { session, initData, initDataType };
+    this.sessions_.push(entry);
 
     session.addEventListener("message", (ev) => {
       this.callbacks_.onMessage(session, ev as MediaKeyMessageEvent);
@@ -92,11 +93,33 @@ export class SessionManager {
       this.callbacks_.onKeyStatuses(session);
     });
 
+    this.watchSessionClosed_(entry);
+
     await session.generateRequest(
       initDataType,
       BufferUtils.toArrayBuffer(initData),
     );
     return session.sessionId;
+  }
+
+  private async watchSessionClosed_(entry: SessionEntry): Promise<void> {
+    const reason = await entry.session.closed;
+    this.onSessionClosed_(entry, reason);
+  }
+
+  private onSessionClosed_(entry: SessionEntry, reason: string): void {
+    const index = this.sessions_.indexOf(entry);
+    if (index === -1) {
+      return;
+    }
+    this.sessions_.splice(index, 1);
+    if (this.destroyed_) {
+      return;
+    }
+    if (reason === "hardware-context-reset") {
+      log.info("Recreating session after hardware-context-reset");
+      this.createSession(entry.initDataType, entry.initData);
+    }
   }
 
   /** Delivers a license response to the session. */
