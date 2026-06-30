@@ -1,0 +1,132 @@
+import type { KeySystem } from "../types/drm";
+import * as BufferUtils from "../utils/buffer_utils";
+import { Log } from "../utils/log";
+
+const log = Log.create("SessionManager");
+
+/**
+ * Callbacks the {@link SessionManager} uses to report session activity
+ * back to its owner without depending on the player or event bus.
+ */
+export interface SessionManagerCallbacks {
+  onMessage(session: MediaKeySession, event: MediaKeyMessageEvent): void;
+  onKeyStatuses(session: MediaKeySession): void;
+}
+
+interface SessionEntry {
+  session: MediaKeySession;
+  initData: Uint8Array;
+  initDataType: string;
+}
+
+/**
+ * Owns the {@link MediaKeys} instance and every {@link MediaKeySession}
+ * for one protected presentation. Single-use: once {@link destroy} runs
+ * the instance is spent and the owner creates a fresh one on re-activation.
+ * This keeps teardown isolated from any concurrent re-activation — the
+ * old instance only ever touches its own captured state.
+ */
+export class SessionManager {
+  private mediaKeys_: MediaKeys | null = null;
+  private media_: HTMLMediaElement | null = null;
+  private sessions_: SessionEntry[] = [];
+  private attachPromise_: Promise<void> | null = null;
+  private destroyed_ = false;
+
+  constructor(
+    private access_: MediaKeySystemAccess,
+    private callbacks_: SessionManagerCallbacks,
+  ) {}
+
+  get keySystem(): KeySystem {
+    return this.access_.keySystem as KeySystem;
+  }
+
+  /** Creates MediaKeys and installs the server certificate if given. */
+  async init(serverCertificate?: Uint8Array): Promise<void> {
+    this.mediaKeys_ = await this.access_.createMediaKeys();
+    if (serverCertificate) {
+      await this.mediaKeys_.setServerCertificate(
+        BufferUtils.toArrayBuffer(serverCertificate),
+      );
+    }
+  }
+
+  /** Attaches MediaKeys to the media element. Idempotent. */
+  async attach(media: HTMLMediaElement): Promise<void> {
+    if (!this.mediaKeys_ || this.destroyed_) {
+      return;
+    }
+    this.media_ = media;
+    if (!this.attachPromise_) {
+      this.attachPromise_ = media.setMediaKeys(this.mediaKeys_);
+    }
+    await this.attachPromise_;
+  }
+
+  /**
+   * Creates a session for the given init data and issues the license
+   * request. Returns the session id, or `null` when the init data
+   * duplicates an existing session or the manager is not usable.
+   */
+  async createSession(
+    initDataType: string,
+    initData: Uint8Array,
+  ): Promise<string | null> {
+    if (!this.mediaKeys_ || this.destroyed_) {
+      return null;
+    }
+    if (this.sessions_.some((e) => BufferUtils.bytesEqual(e.initData, initData))) {
+      return null;
+    }
+
+    const session = this.mediaKeys_.createSession("temporary");
+    this.sessions_.push({ session, initData, initDataType });
+
+    session.addEventListener("message", (ev) => {
+      this.callbacks_.onMessage(session, ev as MediaKeyMessageEvent);
+    });
+    session.addEventListener("keystatuseschange", () => {
+      this.callbacks_.onKeyStatuses(session);
+    });
+
+    await session.generateRequest(
+      initDataType,
+      BufferUtils.toArrayBuffer(initData),
+    );
+    return session.sessionId;
+  }
+
+  /** Delivers a license response to the session. */
+  async update(session: MediaKeySession, response: Uint8Array): Promise<void> {
+    await session.update(BufferUtils.toArrayBuffer(response));
+  }
+
+  /**
+   * Closes every session, then detaches MediaKeys. Snapshots state up
+   * front so the instance is inert immediately.
+   */
+  async destroy(): Promise<void> {
+    this.destroyed_ = true;
+    const sessions = this.sessions_.map((e) => e.session);
+    const media = this.media_;
+    this.sessions_ = [];
+    this.media_ = null;
+
+    for (const session of sessions) {
+      try {
+        await session.close();
+      } catch {
+        // Closing a session that issued no request can throw; ignore.
+      }
+    }
+    if (media) {
+      try {
+        await media.setMediaKeys(null);
+      } catch (err) {
+        log.debug("setMediaKeys(null) failed during destroy", err);
+      }
+    }
+    this.mediaKeys_ = null;
+  }
+}
