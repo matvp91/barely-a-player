@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "../../lib/drm/session_manager";
+import type { FakeMediaKeySession } from "../__framework__/eme";
 import {
   createFakeKeySystemAccess,
   FakeMediaElement,
   FakeMediaKeys,
-  type FakeMediaKeySession,
 } from "../__framework__/eme";
 
 const noopCallbacks = () => ({
@@ -30,7 +30,9 @@ describe("SessionManager", () => {
     const { keys, manager } = setup();
     await manager.init(new Uint8Array([1, 2, 3]));
     expect(keys.serverCertificate).not.toBeNull();
-    expect(Array.from(new Uint8Array(keys.serverCertificate!))).toEqual([1, 2, 3]);
+    expect(Array.from(new Uint8Array(keys.serverCertificate!))).toEqual([
+      1, 2, 3,
+    ]);
   });
 
   it("does not set a server certificate when none is provided", async () => {
@@ -56,7 +58,9 @@ describe("SessionManager", () => {
     expect(keys.sessions).toHaveLength(1);
     expect(id).toBe(keys.sessions[0]!.sessionId);
     expect(
-      Array.from(new Uint8Array(keys.sessions[0]!.generateRequestArgs[0]!.initData)),
+      Array.from(
+        new Uint8Array(keys.sessions[0]!.generateRequestArgs[0]!.initData),
+      ),
     ).toEqual([10, 20]);
   });
 
@@ -64,7 +68,10 @@ describe("SessionManager", () => {
     const { keys, manager } = setup();
     await manager.init();
     await manager.createSession("cenc", new Uint8Array([1, 2, 3]));
-    const second = await manager.createSession("cenc", new Uint8Array([1, 2, 3]));
+    const second = await manager.createSession(
+      "cenc",
+      new Uint8Array([1, 2, 3]),
+    );
     expect(second).toBeNull();
     expect(keys.sessions).toHaveLength(1);
   });
@@ -99,7 +106,10 @@ describe("SessionManager", () => {
     await manager.init();
     await manager.createSession("cenc", new Uint8Array([1]));
     const session = keys.sessions[0]!;
-    await manager.update(session as unknown as MediaKeySession, new Uint8Array([5, 6]));
+    await manager.update(
+      session as unknown as MediaKeySession,
+      new Uint8Array([5, 6]),
+    );
     expect(Array.from(new Uint8Array(session.updateArgs[0]!))).toEqual([5, 6]);
   });
 
@@ -112,7 +122,9 @@ describe("SessionManager", () => {
     await manager.createSession("cenc", new Uint8Array([2]));
     const sessions = [...keys.sessions];
     await manager.destroy();
-    expect(sessions.every((s: FakeMediaKeySession) => s.closeCount === 1)).toBe(true);
+    expect(sessions.every((s: FakeMediaKeySession) => s.closeCount === 1)).toBe(
+      true,
+    );
     expect(media.setMediaKeysCalls.at(-1)).toBeNull();
   });
 
@@ -139,5 +151,26 @@ describe("SessionManager", () => {
     const id = await manager.createSession("cenc", new Uint8Array([1]));
     expect(id).toBeNull();
     expect(keys.sessions).toHaveLength(0);
+  });
+
+  it("does not hang destroy when a session.close() never resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      const { keys, manager } = setup();
+      const media = new FakeMediaElement();
+      await manager.init();
+      await manager.attach(media as unknown as HTMLMediaElement);
+      await manager.createSession("cenc", new Uint8Array([1]));
+      keys.sessions[0]!.closeBlocks = true;
+
+      const destroyed = manager.destroy();
+      await vi.advanceTimersByTimeAsync(1000);
+      await destroyed;
+
+      // Despite the stuck close(), MediaKeys were still detached.
+      expect(media.setMediaKeysCalls.at(-1)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

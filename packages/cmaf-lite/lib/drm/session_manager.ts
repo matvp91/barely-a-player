@@ -76,7 +76,9 @@ export class SessionManager {
     if (!this.mediaKeys_ || this.destroyed_) {
       return null;
     }
-    if (this.sessions_.some((e) => BufferUtils.bytesEqual(e.initData, initData))) {
+    if (
+      this.sessions_.some((e) => BufferUtils.bytesEqual(e.initData, initData))
+    ) {
       return null;
     }
 
@@ -116,13 +118,14 @@ export class SessionManager {
     this.sessions_ = [];
     this.media_ = null;
 
-    for (const session of sessions) {
-      try {
-        await session.close();
-      } catch {
-        // Closing a session that issued no request can throw; ignore.
-      }
-    }
+    await Promise.all(
+      sessions.map((session) =>
+        promiseWithTimeout(
+          Promise.resolve(session.close()).catch(() => {}),
+          CLOSE_TIMEOUT_SECONDS,
+        ),
+      ),
+    );
     if (media) {
       try {
         await media.setMediaKeys(null);
@@ -132,4 +135,30 @@ export class SessionManager {
     }
     this.mediaKeys_ = null;
   }
+}
+
+const CLOSE_TIMEOUT_SECONDS = 1;
+
+/**
+ * Resolves when `promise` settles or after `seconds`, whichever comes
+ * first. Guards against CDMs whose `session.close()` never resolves
+ * (crbug.com/1108158).
+ */
+function promiseWithTimeout(
+  promise: Promise<unknown>,
+  seconds: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timeout = setTimeout(resolve, seconds * 1000);
+    promise.then(
+      () => {
+        clearTimeout(timeout);
+        resolve();
+      },
+      () => {
+        clearTimeout(timeout);
+        resolve();
+      },
+    );
+  });
 }
