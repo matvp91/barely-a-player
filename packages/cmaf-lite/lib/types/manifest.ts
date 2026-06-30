@@ -72,8 +72,8 @@ export interface VideoSwitchingSet extends BaseSwitchingSet {
   type: MediaType.VIDEO;
   /** Video tracks. */
   tracks: VideoTrack[];
-  /** Protection. */
-  protection: Protection | null;
+  /** Protection. Absent for clear content. */
+  protection?: Protection;
 }
 
 /**
@@ -87,8 +87,8 @@ export interface AudioSwitchingSet extends BaseSwitchingSet {
   language: string;
   /** Audio tracks. */
   tracks: AudioTrack[];
-  /** Protection. */
-  protection: Protection | null;
+  /** Protection. Absent for clear content. */
+  protection?: Protection;
 }
 
 /**
@@ -143,8 +143,11 @@ export interface VideoTrack extends BaseTrack {
   width: number;
   /** Video height. */
   height: number;
-  /** Frames per second. Decimal form (e.g. 30 or 29.97). */
-  frameRate: number;
+  /**
+   * Frames per second. Decimal form (e.g. 30 or 29.97). Optional —
+   * `@frameRate` may be absent in the MPD.
+   */
+  frameRate?: number;
 }
 
 /**
@@ -154,10 +157,16 @@ export interface VideoTrack extends BaseTrack {
  */
 export interface AudioTrack extends BaseTrack {
   type: MediaType.AUDIO;
-  /** Channel count (e.g. 2 for stereo, 6 for 5.1). */
-  channels: number;
-  /** Sample rate in Hz. */
-  sampleRate: number;
+  /**
+   * Channel count (e.g. 2 for stereo, 6 for 5.1). Optional — absent when
+   * no `AudioChannelConfiguration` is declared.
+   */
+  channels?: number;
+  /**
+   * Sample rate in Hz. Optional — absent when `@audioSamplingRate` is not
+   * declared.
+   */
+  sampleRate?: number;
 }
 
 /**

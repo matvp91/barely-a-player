@@ -168,7 +168,7 @@ export function resolveLanguage(node: txml.TNode) {
 export function resolveProtection(
   adaptationSet: txml.TNode,
   representations: txml.TNode[],
-): Protection | null {
+): Protection | undefined {
   const firstRepresentation = representations[0];
   const nodes = Functional.firstNonEmpty([
     XmlUtils.children(adaptationSet, "ContentProtection"),
@@ -177,7 +177,7 @@ export function resolveProtection(
   ]);
 
   if (nodes.length === 0) {
-    return null;
+    return undefined;
   }
 
   let scheme: EncryptionScheme | null = null;

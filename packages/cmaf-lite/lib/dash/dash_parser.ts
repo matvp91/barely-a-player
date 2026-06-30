@@ -303,7 +303,6 @@ function buildTrack(
     const frameRate = Functional.findMap(nodes, (n) =>
       XmlUtils.attr(n, "frameRate", parseFrameRate),
     );
-    asserts.assertExists(frameRate, "frameRate is mandatory");
 
     return {
       id,
@@ -320,12 +319,10 @@ function buildTrack(
     const nodes = [representation, adaptationSet];
 
     const sampleRate = Functional.findMap(nodes, (n) =>
-      XmlUtils.attr(n, "audioSamplingRate", XmlUtils.parseNumber),
+      XmlUtils.attr(n, "audioSamplingRate", parseSampleRate),
     );
-    asserts.assertExists(sampleRate, "sampleRate is mandatory");
 
     const channels = Functional.findMap(nodes, DashHelpers.resolveChannelCount);
-    asserts.assertExists(channels, "channels is mandatory");
 
     return {
       id,
@@ -544,4 +541,15 @@ export function parseFrameRate(value: string): number | undefined {
     return undefined;
   }
   return numerator / denominator;
+}
+
+/**
+ * Parses an `audioSamplingRate` attribute. DASH permits a space-separated
+ * pair (min/max); we take the first value. Returns undefined when the
+ * value is empty or not a finite number.
+ */
+export function parseSampleRate(value: string): number | undefined {
+  const first = value.trim().split(/\s+/)[0];
+  const n = Number(first);
+  return first && Number.isFinite(n) ? n : undefined;
 }
