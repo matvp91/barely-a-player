@@ -41,6 +41,7 @@ export const Events = {
   KEY_SESSION_CREATED: "keySessionCreated",
   KEY_STATUSES_CHANGED: "keyStatusesChanged",
   ERROR: "error",
+  RESTRICTIONS_UPDATED: "restrictionsUpdated",
 } as const;
 
 /**
@@ -245,4 +246,5 @@ export interface EventMap {
   [Events.KEY_SESSION_CREATED]: (event: KeySessionCreatedEvent) => void;
   [Events.KEY_STATUSES_CHANGED]: (event: KeyStatusesChangedEvent) => void;
   [Events.ERROR]: (event: PlayerError) => void;
+  [Events.RESTRICTIONS_UPDATED]: undefined;
 }
